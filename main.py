@@ -157,7 +157,7 @@ STAFF_COMMANDS = [
     "nexttester", "setwaitlistcategory", "queue", "kickfromqueue", "leaderboard", "profile",
     "pointsto", "setimage", "point", "region",
     "gettier", "history", "image", "tierlist", "waitlist", "website",
-    "removeplayerrole",
+    "removeplayerrole", "verify",
 ]
 
 
@@ -360,7 +360,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 tree = bot.tree
 
 
-DEFAULT_GAMEMODES = ["Sword", "Axe", "NethOP", "UHC", "SMP", "Pot", "Mace", "Crystal", "Spear"]
+DEFAULT_GAMEMODES = ["Sword", "Axe", "NethOP", "UHC", "SMP", "Pot", "Mace", "Crystal"]
 
 active_queues: dict[int, "QueueView"] = {}
 
@@ -997,8 +997,24 @@ async def submittest(
         return
 
     data = load_data()
-    key = username.lower()
     gm_key = gamemode.lower()
+
+    # Resolve the correct player key — may be stored as plain username or <@discord_id>
+    username_lower = username.lower()
+    if username_lower in data.get("players", {}):
+        key = username_lower
+    else:
+        # Check profiles for a matching Minecraft username → find their <@discord_id> key
+        key = username_lower  # fallback
+        for v in data.get("profiles", {}).values():
+            if v.get("minecraft_username", "").lower() == username_lower:
+                discord_id = v.get("discord_id")
+                if discord_id:
+                    mention_key = f"<@{discord_id}>"
+                    if mention_key in data.get("players", {}):
+                        key = mention_key
+                break
+
     rank_before = data["players"].get(key, {}).get(gm_key, {}).get("tier", "Unranked")
 
     test = {
@@ -1200,6 +1216,88 @@ async def profile_cmd(interaction: discord.Interaction, member: discord.Member):
     except Exception as e:
         print(f"Profile card error: {e}")
         await interaction.followup.send("❌ Failed to generate the profile card.", ephemeral=True)
+
+
+@tree.command(name="verify", description="Manually verify a player's profile (staff only)")
+@app_commands.describe(
+    member="The Discord member to verify",
+    minecraft_username="Their Minecraft username",
+    region="Their region",
+    account_type="Java or Bedrock edition",
+)
+@app_commands.choices(
+    region=[
+        app_commands.Choice(name="🇺🇸 NA — North America", value="NA"),
+        app_commands.Choice(name="🇪🇺 EU — Europe",        value="EU"),
+        app_commands.Choice(name="🇮🇳 AS — Asia",          value="AS"),
+        app_commands.Choice(name="🇧🇷 SA — South America", value="SA"),
+        app_commands.Choice(name="🇦🇺 OCE — Oceania",      value="OCE"),
+    ],
+    account_type=[
+        app_commands.Choice(name="☕ Java",    value="Java"),
+        app_commands.Choice(name="🪨 Bedrock", value="Bedrock"),
+    ],
+)
+@require_command_role("verify")
+async def verify_cmd(
+    interaction: discord.Interaction,
+    member: discord.Member,
+    minecraft_username: str,
+    region: str,
+    account_type: str,
+):
+    await interaction.response.defer(ephemeral=True)
+    data = load_data()
+    user_key = str(member.id)
+    mention_key = f"<@{member.id}>"
+    mc_name = minecraft_username.strip()
+
+    # Build / update the profile entry
+    existing_profile = data.setdefault("profiles", {}).get(user_key, {})
+    data["profiles"][user_key] = {
+        "discord_id":         user_key,
+        "discord_name":       str(member),
+        "minecraft_username": mc_name,
+        "region":             region,
+        "account_type":       account_type,
+        "verified_at":        datetime.datetime.utcnow().isoformat(),
+        # Preserve skin_url if already set
+        "skin_url":           existing_profile.get("skin_url", ""),
+    }
+
+    # Keep discord_names map up to date
+    data.setdefault("discord_names", {})[user_key] = mc_name
+
+    # Merge any plain-username player entry into the <@discord_id> key
+    plain_key = mc_name.lower()
+    players = data.setdefault("players", {})
+    if plain_key in players and mention_key not in players:
+        players[mention_key] = players.pop(plain_key)
+    elif plain_key in players and mention_key in players:
+        # Merge — prefer the <@id> entry, copy any gamemodes missing from it
+        for gm, val in players[plain_key].items():
+            if gm not in players[mention_key]:
+                players[mention_key][gm] = val
+        del players[plain_key]
+
+    save_data(data)
+
+    region_flags = {"NA": "🇺🇸", "EU": "🇪🇺", "AS": "🇮🇳", "SA": "🇧🇷", "OCE": "🇦🇺"}
+    flag = region_flags.get(region, "🌍")
+    account_emoji = "☕" if account_type == "Java" else "🪨"
+
+    embed = discord.Embed(
+        title="✅ Profile Verified",
+        color=discord.Color.green(),
+    )
+    embed.add_field(name="Discord",   value=member.mention,                   inline=True)
+    embed.add_field(name="Username",  value=f"`{mc_name}`",                   inline=True)
+    embed.add_field(name="Region",    value=f"{flag} `{region}`",             inline=True)
+    embed.add_field(name="Account",   value=f"{account_emoji} `{account_type}`", inline=True)
+    embed.set_footer(text=f"Verified by {interaction.user}")
+    embed.set_thumbnail(url=member.display_avatar.url)
+
+    await interaction.followup.send(embed=embed, ephemeral=False)
 
 
 @tree.command(name="image", description="Upload a profile image shown on the website leaderboard")
@@ -1786,7 +1884,7 @@ def build_queue_embed(gamemode: str, tester: discord.Member, members: list, clos
     else:
         embed.add_field(name="Players in Queue (0)", value="*Nobody yet — click Join!*", inline=False)
     if not closed:
-        embed.set_footer(text="Queue closes in 3 minutes • Click Join to enter, Leave to exit")
+        embed.set_footer(text="Click Join to enter, Leave to exit • Tester can close the queue anytime")
     else:
         embed.set_footer(text="This queue has closed.")
     return embed
@@ -1794,7 +1892,7 @@ def build_queue_embed(gamemode: str, tester: discord.Member, members: list, clos
 
 class QueueView(discord.ui.View):
     def __init__(self, gamemode: str, tester: discord.Member, message_ref: list, channel_id: int):
-        super().__init__(timeout=QUEUE_TIMEOUT_SECONDS)
+        super().__init__(timeout=None)
         self.gamemode = gamemode
         self.tester = tester
         self.members: list[int] = []
@@ -1814,6 +1912,14 @@ class QueueView(discord.ui.View):
             except Exception:
                 pass
 
+    async def _close(self, interaction: discord.Interaction):
+        active_queues.pop(self.channel_id, None)
+        for item in self.children:
+            item.disabled = True
+        embed = build_queue_embed(self.gamemode, self.tester, self.members, closed=True)
+        await interaction.response.edit_message(embed=embed, view=self)
+        self.stop()
+
     @discord.ui.button(label="Join", emoji="✅", style=discord.ButtonStyle.success, custom_id="queue_join")
     async def join_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         uid = interaction.user.id
@@ -1832,20 +1938,15 @@ class QueueView(discord.ui.View):
         self.members.remove(uid)
         await self._update(interaction)
 
-    async def on_timeout(self):
-        active_queues.pop(self.channel_id, None)
-        for item in self.children:
-            item.disabled = True
-        embed = build_queue_embed(self.gamemode, self.tester, self.members, closed=True)
-        msg = self.message_ref[0] if self.message_ref else None
-        if msg:
-            try:
-                await msg.edit(embed=embed, view=self)
-            except Exception:
-                pass
+    @discord.ui.button(label="Close Queue", emoji="🔒", style=discord.ButtonStyle.secondary, custom_id="queue_close")
+    async def close_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.tester.id:
+            await interaction.response.send_message("❌ Only the tester who opened this queue can close it.", ephemeral=True)
+            return
+        await self._close(interaction)
 
 
-@tree.command(name="queue", description="Open a live queue for a gamemode (3 minutes)")
+@tree.command(name="queue", description="Open a live queue for a gamemode (tester closes manually)")
 @app_commands.describe(gamemode="The gamemode you are testing")
 @require_command_role("queue")
 async def queue_cmd(interaction: discord.Interaction, gamemode: str):
