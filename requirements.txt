@@ -6,3 +6,4 @@ pilmoji
 flask
 waitress
 watchdog
+asyncpg
