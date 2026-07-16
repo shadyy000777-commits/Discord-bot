@@ -770,6 +770,22 @@ async def resolve_discord_names():
     print(f"Resolved {len(names)} Discord display names for leaderboard.")
 
 
+@tree.error
+async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    """Global slash-command error handler.
+
+    Silently ignores 'Interaction has already been acknowledged' (40060) and
+    'Unknown interaction' (10062) errors — these are expected noise when the
+    same bot token runs on both Railway and Replit simultaneously, because
+    both instances receive every INTERACTION_CREATE event but only one can
+    successfully respond.  Any other error is logged normally.
+    """
+    original = getattr(error, "original", error)
+    if isinstance(original, discord.errors.HTTPException) and original.code in (10062, 40060):
+        return  # dual-run artifact — safe to ignore
+    print(f"[app_command_error] {error}")
+
+
 @bot.event
 async def on_ready():
     data = load_data()
@@ -1072,6 +1088,24 @@ async def submittest(
             "updated_at": test["tested_at"],
             "updated_by": str(interaction.user),
         }
+
+    # If the player's key is a Discord mention but they have no discord_names entry,
+    # resolve their display name now so the website can show them on the leaderboard.
+    if key.startswith("<@") and key.endswith(">"):
+        uid = key[2:-1]
+        if uid not in data.get("discord_names", {}):
+            resolved_name = None
+            if interaction.guild:
+                member = interaction.guild.get_member(int(uid))
+                if member:
+                    resolved_name = member.display_name
+            # If still unresolved but the staff entered a plain MC username (not a mention),
+            # use that as a fallback label so the player is at least visible on the site.
+            if not resolved_name and not username.startswith("<@"):
+                resolved_name = username
+            if resolved_name:
+                data.setdefault("discord_names", {})[uid] = resolved_name
+                print(f"[submittest] discord_names[{uid}] = {resolved_name!r}")
 
     await save_data(data)
 
@@ -1603,7 +1637,9 @@ async def remove_player(interaction: discord.Interaction, position: int):
                 return id_to_profile[uid]
             if uid in discord_names:
                 return discord_names[uid]
-            return None
+            # No profile or name yet — use a fallback so the player still
+            # appears in the numbered list and can be removed by position.
+            return f"Player#{uid[-4:]}"
         return raw_key
 
     player_scores = {}
@@ -2135,12 +2171,26 @@ class PlayerSelect(discord.ui.Select):
         if not isinstance(category, discord.CategoryChannel):
             category = None
 
+        staff_perm = discord.PermissionOverwrite(
+            view_channel=True, send_messages=True,
+            read_message_history=True, manage_channels=True,
+        )
+        member_perm = discord.PermissionOverwrite(
+            view_channel=True, send_messages=True, read_message_history=True,
+        )
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(view_channel=False),
-            guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, manage_channels=True),
-            tester: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
-            player: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
+            guild.me: staff_perm,
+            tester: member_perm,
+            player: member_perm,
         }
+        # Explicitly grant the server owner access (bypassing @everyone deny)
+        if guild.owner and guild.owner not in (tester, player):
+            overwrites[guild.owner] = staff_perm
+        # Explicitly grant any admin roles access
+        for role in guild.roles:
+            if role.permissions.administrator and role not in overwrites:
+                overwrites[role] = staff_perm
 
         safe_name = f"chat-{tester.name}-{player.name}".lower().replace(" ", "-")[:90]
         try:
