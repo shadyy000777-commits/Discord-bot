@@ -14,7 +14,10 @@ OWNER="shadyy000777-commits"
 REPO="Discord-bot"
 BASE_DIR="$(pwd)"
 
-ALL_FILES="main.py config.py requirements.txt railway_server.py Procfile railway.json nixpacks.toml runtime.txt requirements-web.txt push_to_github.sh replit.md website"
+# Bot-only files — website config (nixpacks.toml, Procfile, railway.json,
+# requirements-web.txt, railway_server.py) must NOT be pushed here or Railway's
+# bot service will try to install web deps and run the wrong start command.
+ALL_FILES="main.py config.py requirements.txt push_to_github.sh replit.md"
 
 echo "▶ Pushing to $OWNER/$REPO ..."
 
