@@ -934,6 +934,9 @@ async def on_ready():
     print(f"Total guilds synced: {len(synced_guilds)}")
     print("------")
 
+    # Init shared database table
+    await _init_db()
+
     # Pull latest player data from GitHub first so this instance always boots
     # with the most current data (critical for Railway which resets local files on redeploy)
     await _pull_data_from_github()
