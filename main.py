@@ -220,18 +220,15 @@ def load_data() -> dict:
 
 
 async def save_data(data: dict):
-    """Write locally, then push to GitHub and WAIT for it to finish.
-
-    Previously this fired the GitHub push as a background task and returned
-    immediately, so the command could report success to Discord before the
-    data was actually safe on GitHub. If the process restarted/redeployed in
-    that window (e.g. right after a code deploy), the push never completed
-    and the test silently vanished with no error anywhere. Awaiting it here
-    means: by the time the command's success message is sent, the data is
-    already confirmed on GitHub — a redeploy after that point can't lose it.
-    """
+    """Write locally, push to DB (instant), and push to GitHub as backup."""
     with open(DATA_FILE, "w") as f:
         json.dump(data, f, indent=2)
+    # DB push first — instant, no GitHub lag
+    try:
+        await _push_data_to_db(data)
+    except Exception as e:
+        print(f"[save_data] DB push failed: {e}")
+    # GitHub push as backup
     try:
         await _push_data_to_github()
     except Exception as e:
