@@ -94,6 +94,45 @@ async def _pull_data_from_github() -> bool:
         return False
 
 
+async def _init_db():
+    """Create tiers_data table if it doesn't exist."""
+    db_url = os.getenv("DATABASE_URL")
+    if not db_url:
+        print("[DB] No DATABASE_URL — skipping DB init")
+        return
+    try:
+        conn = await asyncpg.connect(db_url)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS tiers_data (
+                id INTEGER PRIMARY KEY DEFAULT 1,
+                data JSONB NOT NULL,
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+        await conn.close()
+        print("[DB] Table ready ✅")
+    except Exception as e:
+        print(f"[DB] Init error: {e}")
+
+
+async def _push_data_to_db(data: dict):
+    """Upsert full tiers_data to the shared PostgreSQL database (instant — no GitHub lag)."""
+    db_url = os.getenv("DATABASE_URL")
+    if not db_url:
+        return
+    try:
+        conn = await asyncpg.connect(db_url)
+        await conn.execute("""
+            INSERT INTO tiers_data (id, data, updated_at)
+            VALUES (1, $1::jsonb, NOW())
+            ON CONFLICT (id) DO UPDATE SET data = $1::jsonb, updated_at = NOW()
+        """, json.dumps(data))
+        await conn.close()
+        print("[DB sync] tiers_data updated ✅")
+    except Exception as e:
+        print(f"[DB sync] Error: {e}")
+
+
 async def _push_data_to_github():
     token = os.getenv("GITHUB_TOKEN")
     if not token:
