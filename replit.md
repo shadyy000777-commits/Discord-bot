@@ -28,7 +28,10 @@ Instead, verify code changes with a syntax/import check, e.g. `python -m py_comp
 Note: `railway_server.py`, `Procfile`, and `railway.json` are the website-only Railway service (no Discord login) — a separate Railway service runs `main.py` for the actual bot.
 
 ## User preferences
-- After committing changes to Discord bot code/commands (`main.py`, `config.py`, `requirements.txt`), always run `bash push_to_github.sh "<commit message>"` so those changes are pushed to the `Discord-bot` GitHub repo (and `AFTERSHOCK-TIERS`).
+- **Bot changes** (`main.py`, `config.py`, `requirements.txt`): run `bash push_to_github.sh "<message>" bot` → pushes to `Discord-bot` repo only.
+- **Website changes** (`railway_server.py`, `website/index.html`, `website/static/`, etc.): run `bash push_to_github.sh "<message>" website` → pushes to `INDEX` repo only.
+- Or use the Replit workflow buttons: **Push Bot to GitHub** / **Push Website to GitHub**.
+- Never push both repos on every change — push only the repo relevant to what was edited.
 - `tiers_data.json`, root-level `index.html`, root-level `static/` and `skins/` are live-synced directly by the running production bot itself (via the GitHub Contents API, see `_push_data_to_github`/`_push_website_to_github`/`_push_image_to_github` in `main.py`) to `AFTERSHOCK-TIERS`, `My-site`, and `INDEX` on every change (e.g. every `/submittest`). `push_to_github.sh` must never commit or push these root-level files — this repl's local copies are stale dev snapshots, and force-pushing them would overwrite live production data and make it look like website updates are being reverted.
 - **Two separate `index.html` copies exist and serve two different sites** — always edit both (or copy one over the other) when changing site design/markup:
   - Root `index.html` — pushed live by the bot itself (see above) to feed the **Netlify** site (`My-site`/`INDEX` repos). Never pushed by `push_to_github.sh`.
