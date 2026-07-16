@@ -55,9 +55,48 @@ async def _push_content_to_repo(session: aiohttp.ClientSession, repo: str,
     return False
 
 
+async def _pull_data_from_github() -> bool:
+    """Pull the latest tiers_data.json from GitHub (via API, no CDN cache) and overwrite local.
+
+    Called on startup so both the Replit and Railway instances always boot with
+    the most current player data, regardless of what was in the repo at deploy time.
+    Returns True if the local file was updated from GitHub.
+    """
+    token = os.getenv("GITHUB_TOKEN")
+    headers = {"Accept": "application/vnd.github.v3+json", "User-Agent": "aftershock-bot/1.0"}
+    if token:
+        headers["Authorization"] = f"token {token}"
+    url = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO_CODE}/contents/{GITHUB_FILE}"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers) as r:
+                if r.status != 200:
+                    print(f"[GitHub pull] Failed to fetch data: HTTP {r.status}")
+                    return False
+                resp = await r.json()
+        remote_content = base64.b64decode(resp["content"].replace("\n", ""))
+        remote_data = json.loads(remote_content)
+        remote_players = len(remote_data.get("players", {}))
+        # Only overwrite local if GitHub has more player data (safety check)
+        local_data = load_data()
+        local_players = len(local_data.get("players", {}))
+        if remote_players >= local_players:
+            with open(DATA_FILE, "wb") as f:
+                f.write(remote_content)
+            print(f"[GitHub pull] tiers_data.json pulled from GitHub ✅ ({remote_players} players, {len(remote_data.get('profiles', {}))} profiles)")
+            return True
+        else:
+            print(f"[GitHub pull] Local data is newer ({local_players} players) — keeping local")
+            return False
+    except Exception as e:
+        print(f"[GitHub pull] Error: {e}")
+        return False
+
+
 async def _push_data_to_github():
     token = os.getenv("GITHUB_TOKEN")
     if not token:
+        print("[GitHub sync] No GITHUB_TOKEN — skipping data push")
         return
     try:
         with open(DATA_FILE, "rb") as f:
@@ -480,14 +519,39 @@ class McUsernameModal(discord.ui.Modal, title="Verify Your Profile"):
     async def on_submit(self, interaction: discord.Interaction):
         data = load_data()
         key = str(interaction.user.id)
+        mc_name = self.mc_username.value.strip()
+        mention_key = f"<@{key}>"
+
+        # Preserve existing skin_url if already set
+        existing_profile = data.get("profiles", {}).get(key, {})
         data.setdefault("profiles", {})[key] = {
-            "discord_id":        key,
-            "discord_name":      str(interaction.user),
-            "minecraft_username": self.mc_username.value.strip(),
-            "region":            self.region,
-            "account_type":      self.account_type,
-            "verified_at":       datetime.datetime.utcnow().isoformat(),
+            "discord_id":         key,
+            "discord_name":       str(interaction.user),
+            "minecraft_username": mc_name,
+            "region":             self.region,
+            "account_type":       self.account_type,
+            "verified_at":        datetime.datetime.utcnow().isoformat(),
+            "skin_url":           existing_profile.get("skin_url", ""),
         }
+
+        # Keep discord_names map up to date so the leaderboard can resolve names
+        data.setdefault("discord_names", {})[key] = mc_name
+
+        # Migrate plain-username player entry → <@discord_id> key so region,
+        # skin and profile are all linked correctly on the website.
+        players = data.setdefault("players", {})
+        plain_match = next(
+            (k for k in players if not k.startswith("<@") and k.lower() == mc_name.lower()),
+            None,
+        )
+        if plain_match and mention_key not in players:
+            players[mention_key] = players.pop(plain_match)
+        elif plain_match and mention_key in players:
+            for gm, val in players[plain_match].items():
+                if gm not in players[mention_key]:
+                    players[mention_key][gm] = val
+            del players[plain_match]
+
         await save_data(data)
         region_flags = {"NA": "🇺🇸", "EU": "🇪🇺", "AS": "🇮🇳", "SA": "🇧🇷", "OCE": "🇦🇺"}
         flag = region_flags.get(self.region, "🌍")
@@ -833,8 +897,29 @@ async def on_ready():
     print(f"Total guilds synced: {len(synced_guilds)}")
     print("------")
 
+    # Pull latest player data from GitHub first so this instance always boots
+    # with the most current data (critical for Railway which resets local files on redeploy)
+    await _pull_data_from_github()
     await resolve_discord_names()
     await _push_website_to_github()
+    await _push_data_to_github()
+
+    # Start background task: re-sync from GitHub every 60 seconds so both the
+    # Replit and Railway bot instances stay current even when Discord routes a
+    # /submittest to the other instance (which may have pushed newer data).
+    bot.loop.create_task(_periodic_github_sync())
+
+
+async def _periodic_github_sync():
+    """Pull latest tiers_data.json from GitHub every 60 s so both bot instances
+    stay current even when Discord routes a /submittest to the other instance."""
+    await asyncio.sleep(60)  # let startup finish first
+    while True:
+        try:
+            await _pull_data_from_github()
+        except Exception as e:
+            print(f"[Periodic sync] Error: {e}")
+        await asyncio.sleep(60)
 
 
 @bot.event
@@ -906,20 +991,35 @@ async def set_region(
     region: app_commands.Choice[str],
 ):
     data = load_data()
-    key = username.lower()
+    players = data.setdefault("players", {})
 
-    if key not in data["players"]:
+    # Find the player key case-insensitively — could be a plain username OR a
+    # <@discord_id> key (if the player was already verified).
+    key = next(
+        (k for k in players if k.lower() == username.lower()),
+        None,
+    )
+    if key is None:
+        # Also search by minecraft_username stored in profiles → <@discord_id> key
+        for prof in data.get("profiles", {}).values():
+            if prof.get("minecraft_username", "").lower() == username.lower():
+                mention_key = f"<@{prof['discord_id']}>"
+                if mention_key in players:
+                    key = mention_key
+                    break
+
+    if key is None:
         await interaction.response.send_message(
             f"❌ No player found named `{username}`. Set their tier first with `/settier`.", ephemeral=True
         )
         return
 
-    old_region = data["players"][key].get("region", "Not set")
-    data["players"][key]["region"] = region.value
+    old_region = players[key].get("region", "Not set")
+    players[key]["region"] = region.value
 
     # Also update profile if one exists with this minecraft_username
     for prof in data.get("profiles", {}).values():
-        if prof.get("minecraft_username", "").lower() == key:
+        if prof.get("minecraft_username", "").lower() == username.lower():
             prof["region"] = region.value
             break
 
@@ -1352,17 +1452,21 @@ async def verify_cmd(
     # Keep discord_names map up to date
     data.setdefault("discord_names", {})[user_key] = mc_name
 
-    # Merge any plain-username player entry into the <@discord_id> key
-    plain_key = mc_name.lower()
+    # Merge any plain-username player entry into the <@discord_id> key.
+    # Use a case-insensitive search so "Kaizen" and "kaizen" both match.
     players = data.setdefault("players", {})
-    if plain_key in players and mention_key not in players:
-        players[mention_key] = players.pop(plain_key)
-    elif plain_key in players and mention_key in players:
+    plain_match = next(
+        (k for k in players if not k.startswith("<@") and k.lower() == mc_name.lower()),
+        None,
+    )
+    if plain_match and mention_key not in players:
+        players[mention_key] = players.pop(plain_match)
+    elif plain_match and mention_key in players:
         # Merge — prefer the <@id> entry, copy any gamemodes missing from it
-        for gm, val in players[plain_key].items():
+        for gm, val in players[plain_match].items():
             if gm not in players[mention_key]:
                 players[mention_key][gm] = val
-        del players[plain_key]
+        del players[plain_match]
 
     await save_data(data)
 
@@ -3965,8 +4069,10 @@ LEADERBOARD_HTML = """<!DOCTYPE html>
 
 @web_app.route("/")
 def leaderboard_page():
-    from flask import make_response
-    resp = make_response(LEADERBOARD_HTML)
+    from flask import send_file, make_response
+    import os as _os
+    html_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "website", "index.html")
+    resp = make_response(send_file(html_path, mimetype="text/html"))
     resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
     resp.headers['Pragma'] = 'no-cache'
     return resp
@@ -4079,7 +4185,7 @@ def api_players():
             return None, "", ""
         # Check if this key matches any minecraft_username in profiles
         for v in profiles.values():
-            if v.get("minecraft_username", "").lower() == raw_key:
+            if v.get("minecraft_username", "").lower() == raw_key.lower():
                 return raw_key, v.get("region", "") or direct_region, v.get("skin_url", "")
         return raw_key, direct_region, ""
 
