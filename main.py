@@ -1347,12 +1347,13 @@ async def submittest(
         embed.add_field(name="Role Removed", value=f"🎭 **{role_removed}** removed\n\u200b", inline=False)
     _POSES = ["default", "walking", "crouching", "crossed", "criss_cross", "ultimate", "cheering", "relaxing", "high_ground", "trudging"]
     _pose = random.choice(_POSES)
-    embed.set_thumbnail(url=f"https://starlightskins.lunareclipse.studio/render/{_pose}/{username}/full")
+    embed.set_thumbnail(url=f"https://visage.surgeplay.com/bust/256/{username}")
+    embed.set_image(url=f"https://starlightskins.lunareclipse.studio/render/{_pose}/{username}/full")
 
     view = RemoveRoleView(
         target_role=target_role,
         already_removed=role_removed is not None,
-    )
+    ) if target_role is not None or role_removed is not None else None
     await interaction.followup.send(content=f"**{username}**", embed=embed, view=view)
 
 
