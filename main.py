@@ -1875,7 +1875,7 @@ async def removetier(interaction: discord.Interaction, username: str, gamemode: 
                 player_key = mention_key
 
     if player_key is None:
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"❌ No player found with username `{username}`. Check the spelling or use `/leaderboard` to find them.",
             ephemeral=True,
         )
