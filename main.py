@@ -1324,9 +1324,9 @@ async def submittest(
             print(f"[submittest] Role removal error: {re_err}")
 
     color_map = {
-        "passed": discord.Color.red(),
-        "failed": discord.Color.red(),
-        "voided": discord.Color.red(),
+        "passed": discord.Color(0xfa0607),
+        "failed": discord.Color(0xfa0607),
+        "voided": discord.Color(0xfa0607),
     }
     emoji_map = {"passed": "✅", "failed": "❌", "voided": "⬜"}
     rank_earned = tested_tier if result.value == "passed" else "—"
