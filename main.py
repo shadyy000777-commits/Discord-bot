@@ -1198,10 +1198,11 @@ async def submittest(
     result: app_commands.Choice[str],
     notes: str = "",
 ):
+    await interaction.response.defer()
     tested_tier = tested_tier.upper().strip()
     if tested_tier not in TIERS:
         valid = ", ".join(TIERS)
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"❌ Invalid tier `{tested_tier}`. Valid tiers: {valid}", ephemeral=True
         )
         return
@@ -1349,7 +1350,7 @@ async def submittest(
         target_role=target_role,
         already_removed=role_removed is not None,
     )
-    await interaction.response.send_message(content=f"**{username}**", embed=embed, view=view)
+    await interaction.followup.send(content=f"**{username}**", embed=embed, view=view)
 
 
 @tree.command(name="history", description="View tier test history for a player")
