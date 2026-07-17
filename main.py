@@ -227,6 +227,7 @@ async def save_data(data: dict):
     """Write locally, push to DB (instant), and push to GitHub as backup."""
     with open(DATA_FILE, "w") as f:
         json.dump(data, f, indent=2)
+    print(f"[save_data] Saved locally. DB_URL set: {bool(os.getenv('DATABASE_URL'))} | GH_TOKEN set: {bool(os.getenv('GITHUB_TOKEN'))}")
     # DB push first — instant, no GitHub lag
     try:
         await _push_data_to_db(data)
