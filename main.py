@@ -5,7 +5,6 @@ import datetime
 import io
 import base64
 import asyncio
-import random
 import aiohttp
 import asyncpg
 import discord
