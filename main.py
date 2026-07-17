@@ -1285,8 +1285,22 @@ async def submittest(
     embed.add_field(name="Rank Earned",  value=f"{rank_earned}\n\u200b", inline=False)
     if notes:
         embed.add_field(name="Notes", value=f"{notes}\n\u200b", inline=False)
-    embed.set_thumbnail(url=f"https://minotar.net/body/{username}/300.png")
-    await interaction.followup.send(content=f"**{username}**", embed=embed)
+    # Fetch skin server-side so Discord loads it from its own CDN (no external URL timeouts)
+    skin_file = None
+    try:
+        async with aiohttp.ClientSession() as sess:
+            async with sess.get(
+                f"https://mc-heads.net/body/{username}",
+                timeout=aiohttp.ClientTimeout(total=5)
+            ) as r:
+                if r.status == 200:
+                    skin_bytes = await r.read()
+                    skin_file = discord.File(io.BytesIO(skin_bytes), filename="skin.png")
+                    embed.set_thumbnail(url="attachment://skin.png")
+    except Exception:
+        pass  # No skin — embed still sends without it
+
+    await interaction.followup.send(content=f"**{username}**", embed=embed, file=skin_file)
 
     # Role removal runs in the background — doesn't block the response
     async def _bg_remove_role():
