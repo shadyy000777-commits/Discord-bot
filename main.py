@@ -1272,59 +1272,72 @@ async def submittest(
 
     await save_data(data)
 
-    # Build and send the embed immediately — don't wait for role removal
-    rank_earned = tested_tier if result.value == "passed" else "—"
-    embed = discord.Embed(
-        title=f"{username} TEST RESULTS 🏆",
-        color=discord.Color(0xfa0607),
-    )
-    embed.add_field(name="Player Name",  value=f"{username}\n\u200b",   inline=False)
-    embed.add_field(name="Tester Name",  value=f"{tester_name}\n\u200b", inline=False)
-    embed.add_field(name="Game Mode",    value=f"{gamemode}\n\u200b",    inline=False)
-    embed.add_field(name="Rank Before",  value=f"{rank_before}\n\u200b", inline=False)
-    embed.add_field(name="Rank Earned",  value=f"{rank_earned}\n\u200b", inline=False)
-    if notes:
-        embed.add_field(name="Notes", value=f"{notes}\n\u200b", inline=False)
-    embed.set_thumbnail(url=f"https://mc-heads.net/avatar/{username}/100")
-    await interaction.followup.send(content=f"**{username}**", embed=embed)
-
-    # Role removal runs in the background — doesn't block the response
-    async def _bg_remove_role():
-        if not interaction.guild:
-            return
+    # Remove gamemode role from the player after their test result is uploaded
+    role_removed = None
+    target_member = None
+    target_role = None
+    if interaction.guild:
         try:
             discord_id = None
             for uid, profile in data.get("profiles", {}).items():
                 if profile.get("minecraft_username", "").lower() == username.lower():
                     discord_id = int(uid)
                     break
-            if not discord_id:
-                return
-            gm_roles = data.get("gamemode_roles", {})
-            matched_role_id = next(
-                (rid for gm_name, rid in gm_roles.items() if gm_name.lower() == gamemode.lower()), None
-            )
-            if not matched_role_id:
-                return
-            target_role = interaction.guild.get_role(int(matched_role_id))
-            if target_role is None:
-                all_roles = await interaction.guild.fetch_roles()
-                target_role = next((r for r in all_roles if r.id == int(matched_role_id)), None)
-            if not target_role:
-                return
-            try:
-                member = await interaction.guild.fetch_member(discord_id)
-            except discord.NotFound:
-                return
-            if target_role in member.roles:
-                await member.remove_roles(target_role, reason=f"Test result submitted for {gamemode}")
-                print(f"[submittest] Auto-removed role {target_role.name} from {username}")
-        except discord.Forbidden:
-            print(f"[submittest] Missing permission to remove role from {username}")
-        except Exception as e:
-            print(f"[submittest] Role removal error: {e}")
 
-    asyncio.create_task(_bg_remove_role())
+            if discord_id:
+                gm_roles = data.get("gamemode_roles", {})
+                matched_role_id = None
+                for gm_name, rid in gm_roles.items():
+                    if gm_name.lower() == gamemode.lower():
+                        matched_role_id = rid
+                        break
+
+                if matched_role_id:
+                    target_role = interaction.guild.get_role(int(matched_role_id))
+                    if target_role is None:
+                        all_roles = await interaction.guild.fetch_roles()
+                        target_role = next((r for r in all_roles if r.id == int(matched_role_id)), None)
+
+                    try:
+                        target_member = await interaction.guild.fetch_member(discord_id)
+                    except discord.NotFound:
+                        target_member = None
+
+                    if target_role and target_member and target_role in target_member.roles:
+                        await target_member.remove_roles(target_role, reason=f"Test result submitted for {gamemode}")
+                        role_removed = target_role.name
+        except discord.Forbidden:
+            print(f"[submittest] Missing permission to remove gamemode role from {username}")
+        except Exception as re_err:
+            print(f"[submittest] Role removal error: {re_err}")
+
+    color_map = {
+        "passed": discord.Color(0xfa0607),
+        "failed": discord.Color(0xfa0607),
+        "voided": discord.Color(0xfa0607),
+    }
+    rank_earned = tested_tier if result.value == "passed" else "—"
+
+    embed = discord.Embed(
+        title=f"{username} TEST RESULTS 🏆",
+        color=color_map[result.value],
+    )
+    embed.add_field(name="Player Name", value=f"{username}\n\u200b", inline=False)
+    embed.add_field(name="Tester Name", value=f"{tester_name}\n\u200b", inline=False)
+    embed.add_field(name="Game Mode", value=f"{gamemode}\n\u200b", inline=False)
+    embed.add_field(name="Rank Before", value=f"{rank_before}\n\u200b", inline=False)
+    embed.add_field(name="Rank Earned", value=f"{rank_earned}\n\u200b", inline=False)
+    if notes:
+        embed.add_field(name="Notes", value=f"{notes}\n\u200b", inline=False)
+    if role_removed:
+        embed.add_field(name="Role Removed", value=f"🎭 **{role_removed}** removed\n\u200b", inline=False)
+    embed.set_thumbnail(url=f"https://mc-heads.net/avatar/{username}/100")
+
+    view = RemoveRoleView(
+        target_role=target_role,
+        already_removed=role_removed is not None,
+    ) if target_role is not None or role_removed is not None else None
+    await interaction.followup.send(content=f"**{username}**", embed=embed, view=view)
 
 
 @tree.command(name="history", description="View tier test history for a player")
