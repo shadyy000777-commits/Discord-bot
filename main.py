@@ -225,19 +225,21 @@ def load_data() -> dict:
 
 
 async def save_data(data: dict):
-    """Write locally, push to DB (instant), and push to GitHub as backup."""
+    """Write locally, push to DB (instant), and push to GitHub in background."""
     with open(DATA_FILE, "w") as f:
         json.dump(data, f, indent=2)
-    # DB push first — instant, no GitHub lag
+    # DB push — fast, await it so data is live immediately
     try:
         await _push_data_to_db(data)
     except Exception as e:
         print(f"[save_data] DB push failed: {e}")
-    # GitHub push as backup
-    try:
-        await _push_data_to_github()
-    except Exception as e:
-        print(f"[save_data] GitHub push failed: {e}")
+    # GitHub push — slow, fire and forget so command responds instantly
+    async def _bg_github():
+        try:
+            await _push_data_to_github()
+        except Exception as e:
+            print(f"[save_data] GitHub push failed: {e}")
+    asyncio.create_task(_bg_github())
 
 
 STAFF_COMMANDS = [
