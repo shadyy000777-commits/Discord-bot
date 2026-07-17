@@ -122,6 +122,8 @@ async def _push_data_to_db(data: dict):
     db_url = os.getenv("DATABASE_URL")
     if not db_url:
         return
+    # asyncpg requires postgresql://, Railway provides postgres://
+    db_url = db_url.replace("postgres://", "postgresql://", 1)
     try:
         conn = await asyncpg.connect(db_url)
         await conn.execute("""
