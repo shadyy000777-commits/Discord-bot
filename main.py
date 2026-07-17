@@ -100,6 +100,8 @@ async def _init_db():
     if not db_url:
         print("[DB] No DATABASE_URL — skipping DB init")
         return
+    # asyncpg requires postgresql://, Railway provides postgres://
+    db_url = db_url.replace("postgres://", "postgresql://", 1)
     try:
         conn = await asyncpg.connect(db_url)
         await conn.execute("""
