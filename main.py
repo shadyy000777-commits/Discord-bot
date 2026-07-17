@@ -1285,9 +1285,8 @@ async def submittest(
     embed.add_field(name="Rank Earned",  value=f"{rank_earned}\n\u200b", inline=False)
     if notes:
         embed.add_field(name="Notes", value=f"{notes}\n\u200b", inline=False)
-    _POSES = ["default", "walking", "crouching", "crossed", "criss_cross", "ultimate", "cheering", "relaxing", "high_ground", "trudging"]
-    embed.set_thumbnail(url=f"https://visage.surgeplay.com/bust/256/{username}")
-    embed.set_image(url=f"https://starlightskins.lunareclipse.studio/render/{random.choice(_POSES)}/{username}/full")
+    embed.set_thumbnail(url=f"https://mc-heads.net/avatar/{username}/100")
+    embed.set_image(url=f"https://mc-heads.net/body/{username}/250")
     await interaction.followup.send(content=f"**{username}**", embed=embed)
 
     # Role removal runs in the background — doesn't block the response
