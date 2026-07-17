@@ -1285,7 +1285,7 @@ async def submittest(
     embed.add_field(name="Rank Earned",  value=f"{rank_earned}\n\u200b", inline=False)
     if notes:
         embed.add_field(name="Notes", value=f"{notes}\n\u200b", inline=False)
-    embed.set_thumbnail(url=f"https://mc-heads.net/body/{username}")
+    embed.set_thumbnail(url=f"https://minotar.net/body/{username}/300.png")
     await interaction.followup.send(content=f"**{username}**", embed=embed)
 
     # Role removal runs in the background — doesn't block the response
