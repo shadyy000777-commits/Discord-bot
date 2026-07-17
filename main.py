@@ -1335,7 +1335,7 @@ async def submittest(
     view = RemoveRoleView(
         target_role=target_role,
         already_removed=role_removed is not None,
-    )
+    ) if target_role is not None or role_removed is not None else None
     await interaction.followup.send(content=f"**{username}**", embed=embed, view=view)
 
 
