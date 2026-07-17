@@ -1849,6 +1849,7 @@ async def remove_player(interaction: discord.Interaction, position: int):
 )
 @require_command_role("removetier")
 async def removetier(interaction: discord.Interaction, username: str, gamemode: str):
+    await interaction.response.defer(ephemeral=False)
     data = load_data()
     gm_key = gamemode.lower()
 
