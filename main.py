@@ -153,19 +153,22 @@ async def _push_data_to_db(data: dict):
         print(f"[DB sync] Error: {e}")
 
 
-async def _record_tester_test(discord_id: str, tester_name: str, result: str, gamemode: str, tested_at: str):
+async def _record_tester_test(discord_id: str, tester_name: str, result: str, gamemode: str):
     """Insert one row into tester_stats for every submittest invocation."""
     db_url = os.getenv("DATABASE_URL")
     if not db_url:
+        print("[DB] tester_stats: no DATABASE_URL — skipping")
         return
     db_url = db_url.replace("postgres://", "postgresql://", 1)
     try:
         conn = await asyncpg.connect(db_url)
         await conn.execute("""
             INSERT INTO tester_stats (discord_id, tester_name, result, gamemode, tested_at)
-            VALUES ($1, $2, $3, $4, $5::timestamptz)
-        """, discord_id, tester_name, result, gamemode, tested_at)
+            VALUES ($1, $2, $3, $4, $5)
+        """, discord_id, tester_name, result, gamemode,
+            datetime.datetime.utcnow().replace(tzinfo=datetime.timezone.utc))
         await conn.close()
+        print(f"[DB] tester_stats recorded: {tester_name} ({discord_id}) {result} {gamemode} ✅")
     except Exception as e:
         print(f"[DB] tester_stats insert error: {e}")
 
@@ -1310,7 +1313,6 @@ async def submittest(
         tester_name,
         result.value,
         gamemode,
-        test["tested_at"],
     )
 
     # Send embed immediately — no waiting on Discord API calls
@@ -1767,6 +1769,41 @@ async def leaderboard(interaction: discord.Interaction, gamemode: str):
     embed.description = "\n".join(lines)
     embed.set_footer(text=f"Total players in {gamemode}: {len(ranked)}")
     await interaction.response.send_message(embed=embed)
+
+
+@tree.command(name="debugdb", description="[Admin] Check database connection and tester_stats table")
+async def debugdb(interaction: discord.Interaction):
+    if not interaction.user.guild_permissions.administrator and interaction.user.id != interaction.guild.owner_id:
+        await interaction.response.send_message("❌ Admins only.", ephemeral=True)
+        return
+    await interaction.response.defer(ephemeral=True)
+    db_url = os.getenv("DATABASE_URL")
+    if not db_url:
+        await interaction.followup.send("❌ `DATABASE_URL` is **not set** on this bot service.", ephemeral=True)
+        return
+    db_url_pg = db_url.replace("postgres://", "postgresql://", 1)
+    lines = [f"✅ `DATABASE_URL` is set (`…{db_url[-20:]}`)"]
+    try:
+        conn = await asyncpg.connect(db_url_pg)
+        # Check table exists
+        exists = await conn.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name='tester_stats')"
+        )
+        lines.append(f"{'✅' if exists else '❌'} `tester_stats` table exists: **{exists}**")
+        if exists:
+            count = await conn.fetchval("SELECT COUNT(*) FROM tester_stats")
+            lines.append(f"📊 Rows in `tester_stats`: **{count}**")
+            # Test insert + delete
+            await conn.execute("""
+                INSERT INTO tester_stats (discord_id, tester_name, result, gamemode, tested_at)
+                VALUES ('DEBUG_TEST', 'DEBUG', 'passed', 'DEBUG', $1)
+            """, datetime.datetime.utcnow().replace(tzinfo=datetime.timezone.utc))
+            await conn.execute("DELETE FROM tester_stats WHERE discord_id = 'DEBUG_TEST'")
+            lines.append("✅ Test INSERT + DELETE succeeded")
+        await conn.close()
+    except Exception as e:
+        lines.append(f"❌ DB error: `{e}`")
+    await interaction.followup.send("\n".join(lines), ephemeral=True)
 
 
 @tree.command(name="testerstats", description="Show tester leaderboard — who has submitted the most tests")
