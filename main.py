@@ -1328,8 +1328,7 @@ async def submittest(
     embed.add_field(name="Rank Earned", value=f"{rank_earned}\n\u200b", inline=False)
     if notes:
         embed.add_field(name="Notes", value=f"{notes}\n\u200b", inline=False)
-    # Set crafatar body render URL directly — Discord fetches and renders it natively at full size
-    embed.set_thumbnail(url=f"https://crafatar.com/renders/body/{username}?scale=10&overlay&default=MHF_Steve")
+    embed.set_thumbnail(url=f"https://mc-heads.net/body/{username}/600")
 
     await interaction.followup.send(content=f"**{username}**", embed=embed)
 
