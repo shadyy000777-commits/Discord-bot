@@ -1367,8 +1367,57 @@ async def submittest(
         except Exception as e:
             print(f"[submittest] Role removal error: {e}")
 
+<<<<<<< Updated upstream
     _t = asyncio.create_task(_remove_role_bg())
     _t.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
+=======
+    color_map = {
+        "passed": discord.Color.red(),
+        "failed": discord.Color.red(),
+        "voided": discord.Color.red(),
+    }
+    emoji_map = {"passed": "✅", "failed": "❌", "voided": "⬜"}
+    rank_earned = tested_tier if result.value == "passed" else "—"
+
+    embed = discord.Embed(
+        title=f"{username} TEST RESULTS 🏆",
+        color=color_map[result.value],
+    )
+    embed.add_field(name="Player Name", value=f"{username}\n\u200b", inline=False)
+    embed.add_field(name="Tester Name", value=f"{tester_name}\n\u200b", inline=False)
+    embed.add_field(name="Game Mode", value=f"{gamemode}\n\u200b", inline=False)
+    embed.add_field(name="Rank Before", value=f"{rank_before}\n\u200b", inline=False)
+    embed.add_field(name="Rank Earned", value=f"{rank_earned}\n\u200b", inline=False)
+    if notes:
+        embed.add_field(name="Notes", value=f"{notes}\n\u200b", inline=False)
+    if role_removed:
+        embed.add_field(name="Role Removed", value=f"🎭 **{role_removed}** removed\n\u200b", inline=False)
+    # Build 128×153 skin thumbnail and attach as a file so Discord renders it at the exact size
+    skin_file = None
+    skin_img = await _fetch_img(f"https://crafatar.com/renders/body/{username}?scale=4&overlay")
+    if skin_img is None:
+        skin_img = await _fetch_img(f"https://mc-heads.net/body/{username}/128")
+    if skin_img:
+        skin_img = skin_img.resize((128, 153), Image.LANCZOS)
+        buf = io.BytesIO()
+        skin_img.save(buf, format="PNG")
+        buf.seek(0)
+        skin_file = discord.File(buf, filename="skin.png")
+        embed.set_thumbnail(url="attachment://skin.png")
+    else:
+        embed.set_thumbnail(url=f"https://mc-heads.net/avatar/{username}/128")
+
+    view = RemoveRoleView(
+        target_role=target_role,
+        already_removed=role_removed is not None,
+    )
+    await interaction.response.send_message(
+        content=f"**{username}**",
+        embed=embed,
+        file=skin_file if skin_file else discord.utils.MISSING,
+        view=view,
+    )
+>>>>>>> Stashed changes
 
 
 @tree.command(name="history", description="View tier test history for a player")
