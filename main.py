@@ -1402,9 +1402,9 @@ async def submittest(
         skin_img.save(buf, format="PNG")
         buf.seek(0)
         skin_file = discord.File(buf, filename="skin.png")
-        embed.set_thumbnail(url="attachment://skin.png")
+        embed.set_image(url="attachment://skin.png")
     else:
-        embed.set_thumbnail(url=f"https://mc-heads.net/avatar/{username}/128")
+        embed.set_image(url=f"https://mc-heads.net/avatar/{username}/128")
 
     view = RemoveRoleView(
         target_role=target_role,
