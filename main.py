@@ -1164,9 +1164,9 @@ async def submittest(
         )
         return
 
-    # Defer immediately — save_data awaits a GitHub push and role removal
-    # hits the Discord API, both of which can exceed Discord's 3-second timeout.
-    await interaction.response.defer()
+    # Defer ephemerally so the "X used /submittest" indicator is hidden from
+    # the channel. The actual result is sent as a plain channel message below.
+    await interaction.response.defer(ephemeral=True)
 
     data = load_data()
     gm_key = gamemode.lower()
@@ -1315,14 +1315,11 @@ async def submittest(
         skin_file = discord.File(buf, filename="skin.png")
         embed.set_thumbnail(url="attachment://skin.png")
 
-    view = RemoveRoleView(
-        target_role=target_role,
-        already_removed=role_removed is not None,
-    )
+    # Send as a regular channel message so no "X used /submittest" header appears
     if skin_file:
-        await interaction.followup.send(content=f"**{username}**", embed=embed, file=skin_file, view=view)
+        await interaction.channel.send(content=f"**{username}**", embed=embed, file=skin_file)
     else:
-        await interaction.followup.send(content=f"**{username}**", embed=embed, view=view)
+        await interaction.channel.send(content=f"**{username}**", embed=embed)
 
 
 @tree.command(name="history", description="View tier test history for a player")
