@@ -1328,7 +1328,7 @@ async def submittest(
     embed.add_field(name="Rank Earned", value=f"{rank_earned}\n\u200b", inline=False)
     if notes:
         embed.add_field(name="Notes", value=f"{notes}\n\u200b", inline=False)
-    embed.set_thumbnail(url=f"https://mc-heads.net/body/{username}/600")
+    embed.set_thumbnail(url=f"https://crafatar.com/renders/head/{username}?scale=10&overlay&default=MHF_Steve")
 
     await interaction.followup.send(content=f"**{username}**", embed=embed)
 
