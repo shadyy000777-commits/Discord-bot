@@ -1321,6 +1321,12 @@ async def submittest(
     else:
         await interaction.channel.send(content=f"**{username}**", embed=embed)
 
+    # Dismiss the ephemeral "is thinking…" message so it doesn't linger
+    try:
+        await interaction.delete_original_response()
+    except Exception:
+        pass
+
 
 @tree.command(name="history", description="View tier test history for a player")
 @app_commands.describe(username="Minecraft username")
