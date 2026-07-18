@@ -33,51 +33,6 @@ GITHUB_REPO_IDX  = "INDEX"             # New Netlify repo
 GITHUB_FILE      = "tiers_data.json"
 
 # ── Random thumbnail pool for /submittest result embeds ───────────────────────
-_HAND_PICKED_SKINS = [
-    # Popular Minecraft icons
-    "https://mc-heads.net/avatar/Dream",
-    "https://mc-heads.net/avatar/Technoblade",
-    "https://mc-heads.net/avatar/DanTDM",
-    "https://mc-heads.net/avatar/TommyInnit",
-    "https://mc-heads.net/avatar/GeorgeNotFound",
-    "https://mc-heads.net/avatar/Sapnap",
-    "https://mc-heads.net/avatar/Grian",
-    "https://mc-heads.net/avatar/MumboJumbo",
-    "https://mc-heads.net/avatar/CaptainSparklez",
-    "https://mc-heads.net/avatar/Purpled",
-    # Mobs & monsters
-    "https://mc-heads.net/avatar/Creeper",
-    "https://mc-heads.net/avatar/Zombie",
-    "https://mc-heads.net/avatar/Enderman",
-    "https://mc-heads.net/avatar/Skeleton",
-    "https://mc-heads.net/avatar/Blaze",
-    "https://mc-heads.net/avatar/Herobrine",
-    "https://mc-heads.net/avatar/Wither",
-    "https://mc-heads.net/avatar/Slime",
-    # Anime & pop culture
-    "https://mc-heads.net/avatar/Luffy",
-    "https://mc-heads.net/avatar/Naruto",
-    "https://mc-heads.net/avatar/Goku",
-    "https://mc-heads.net/avatar/SpiderMan",
-    "https://mc-heads.net/avatar/Batman",
-    "https://mc-heads.net/avatar/Shrek",
-    # Dev legends
-    "https://mc-heads.net/avatar/Notch",
-    "https://mc-heads.net/avatar/jeb_",
-]
-
-def _get_random_minecraft_thumbnail() -> str:
-    """Return a random Minecraft avatar URL for /submittest embeds.
-
-    30 % chance: one of the curated hand-picked skin profiles above.
-    70 % chance: a dynamically generated unique avatar via a random seed
-                 (mc-heads converts unknown names into distinct random heads).
-    """
-    if random.random() < 0.3:
-        return random.choice(_HAND_PICKED_SKINS)
-    seed = random.randint(0, 999_999)
-    return f"https://mc-heads.net/avatar/skin_{seed}"
-
 
 async def _push_content_to_repo(session: aiohttp.ClientSession, repo: str,
                                   github_path: str, content_b64: str,
@@ -1185,7 +1140,6 @@ class RemoveRoleView(discord.ui.View):
     tested_tier="Tier that was tested (e.g. HT1, LT3)",
     result="Result of the test",
     notes="Optional notes about the test",
-    image_url="Optional image URL to use as the embed thumbnail",
 )
 @app_commands.choices(result=[
     app_commands.Choice(name="Passed", value="passed"),
@@ -1201,7 +1155,6 @@ async def submittest(
     tested_tier: str,
     result: app_commands.Choice[str],
     notes: str = "",
-    image_url: str = "",
 ):
     tested_tier = tested_tier.upper().strip()
     if tested_tier not in TIERS:
@@ -1331,34 +1284,45 @@ async def submittest(
         except Exception as re_err:
             print(f"[submittest] Role removal error: {re_err}")
 
-    color_map = {
-        "passed": discord.Color.red(),
-        "failed": discord.Color.red(),
-        "voided": discord.Color.red(),
-    }
     emoji_map = {"passed": "✅", "failed": "❌", "voided": "⬜"}
     rank_earned = tested_tier if result.value == "passed" else "—"
 
     embed = discord.Embed(
         title=f"{username} TEST RESULTS 🏆",
-        color=color_map[result.value],
+        color=discord.Color(0xfa0607),
     )
-    embed.add_field(name="Player Name", value=f"{username}\n\u200b", inline=False)
-    embed.add_field(name="Tester Name", value=f"{tester_name}\n\u200b", inline=False)
-    embed.add_field(name="Game Mode", value=f"{gamemode}\n\u200b", inline=False)
-    embed.add_field(name="Rank Before", value=f"{rank_before}\n\u200b", inline=False)
-    embed.add_field(name="Rank Earned", value=f"{rank_earned}\n\u200b", inline=False)
+    embed.add_field(name="Player Name", value=username,    inline=False)
+    embed.add_field(name="Tester Name", value=tester_name, inline=False)
+    embed.add_field(name="Game Mode",   value=gamemode,    inline=False)
+    embed.add_field(name="Rank Before", value=rank_before, inline=False)
+    embed.add_field(name="Rank Earned", value=rank_earned, inline=False)
     if notes:
-        embed.add_field(name="Notes", value=f"{notes}\n\u200b", inline=False)
+        embed.add_field(name="Notes", value=notes, inline=False)
     if role_removed:
-        embed.add_field(name="Role Removed", value=f"🎭 **{role_removed}** removed\n\u200b", inline=False)
-    embed.set_thumbnail(url=image_url.strip() if image_url.strip() else _get_random_minecraft_thumbnail())
+        embed.add_field(name="Role Removed", value=f"🎭 **{role_removed}** removed", inline=False)
+
+    # Fetch body render, crop to upper 55% (head + torso) and attach as thumbnail
+    skin_file = None
+    skin_img = await _fetch_img(f"https://crafatar.com/renders/body/{username}?scale=4&overlay")
+    if skin_img is None:
+        skin_img = await _fetch_img(f"https://mc-heads.net/body/{username}/128")
+    if skin_img:
+        w, h = skin_img.size
+        skin_img = skin_img.crop((0, 0, w, int(h * 0.55)))
+        buf = io.BytesIO()
+        skin_img.save(buf, format="PNG")
+        buf.seek(0)
+        skin_file = discord.File(buf, filename="skin.png")
+        embed.set_thumbnail(url="attachment://skin.png")
 
     view = RemoveRoleView(
         target_role=target_role,
         already_removed=role_removed is not None,
     )
-    await interaction.followup.send(content=f"**{username}**", embed=embed, view=view)
+    if skin_file:
+        await interaction.followup.send(content=f"**{username}**", embed=embed, file=skin_file, view=view)
+    else:
+        await interaction.followup.send(content=f"**{username}**", embed=embed, view=view)
 
 
 @tree.command(name="history", description="View tier test history for a player")
