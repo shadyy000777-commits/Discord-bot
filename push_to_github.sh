@@ -92,8 +92,11 @@ copy_web_files() {
 
     for d in "${WEB_DIRS[@]}"; do
         if [ -e "${src}/${d}" ]; then
-            rm -rf "${dest:?}/${d}"
-            cp -r "${src}/${d}" "${dest}/${d}"
+            # Merge local files INTO the clone without deleting anything already
+            # in the remote. This prevents stale local copies from wiping live
+            # content that the bot syncs directly (bg images, skins, etc.).
+            mkdir -p "${dest}/${d}"
+            cp -r "${src}/${d}/." "${dest}/${d}/"
         fi
     done
 }
