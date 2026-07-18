@@ -1,68 +1,72 @@
 #!/bin/bash
-# Push bot code to the Discord-bot GitHub repo.
-# Railway auto-deploys from there — pushing here is all that's needed.
+# Push changes to the correct GitHub repo.
+# Works by cloning the target repo into a temp dir, copying files in, then pushing.
+# The local workspace is NEVER modified — no git reset, no stash, no pull.
 #
-# Usage: bash push_to_github.sh "commit message"
+# Usage:
+#   bash push_to_github.sh bot     "commit message"   → pushes to Discord-bot
+#   bash push_to_github.sh website "commit message"   → pushes to INDEX
 
 set -e
 
-COMMIT_MSG="${1:-Update from Replit}"
-OWNER="shadyy000777-commits"
-REPO="Discord-bot"
-BASE_DIR="$(pwd)"
+TARGET="${1}"
+COMMIT_MSG="${2:-Update from Replit}"
+TMPDIR=$(mktemp -d)
 
-# Bot-only files to copy into the repo
-BOT_FILES="main.py config.py requirements.txt push_to_github.sh replit.md"
+cleanup() { rm -rf "$TMPDIR"; }
+trap cleanup EXIT
 
-# Website-only files that must be deleted from the repo if present
-# (they cause Railway to run the wrong build/start command for the bot)
-WEBSITE_ONLY="nixpacks.toml Procfile railway.json railway_server.py requirements-web.txt runtime.txt index.html website"
+git_cfg() {
+  git -C "$TMPDIR" config user.email "aftershock@replit.com"
+  git -C "$TMPDIR" config user.name "Aftershock Bot"
+}
 
-echo "▶ Pushing to $OWNER/$REPO ..."
+if [ "$TARGET" = "bot" ]; then
+  REPO="Discord-bot"
+  FILES="main.py config.py requirements.txt push_to_github.sh replit.md"
 
-TMP_DIR=$(mktemp -d)
-trap "rm -rf $TMP_DIR" EXIT
+  echo "▶ Cloning ${REPO}..."
+  git clone --depth 1 "https://x-access-token:${GITHUB_TOKEN}@github.com/shadyy000777-commits/${REPO}" "$TMPDIR" -q
+  git_cfg
 
-git clone --depth=1 "https://x-access-token:${GITHUB_TOKEN}@github.com/${OWNER}/${REPO}.git" "$TMP_DIR" 2>&1
+  for f in $FILES; do
+    [ -e "$f" ] && cp -r "$f" "$TMPDIR/$f" && echo "  copied $f"
+  done
 
-# Copy bot files in
-for item in $BOT_FILES; do
-    if [ -e "$BASE_DIR/$item" ]; then
-        dest="$TMP_DIR/$item"
-        mkdir -p "$(dirname "$dest")"
-        cp "$BASE_DIR/$item" "$dest"
-    fi
-done
+  git -C "$TMPDIR" add .
+  if ! git -C "$TMPDIR" diff --cached --quiet; then
+    git -C "$TMPDIR" commit -m "$COMMIT_MSG"
+    git -C "$TMPDIR" push origin main
+    echo "✅ Pushed to ${REPO}."
+  else
+    echo "ℹ️  Nothing new to commit in ${REPO}."
+  fi
 
-# Write a bot-specific nixpacks.toml so Railway uses the right start command
-cat > "$TMP_DIR/nixpacks.toml" <<'EOF'
-[phases.install]
-cmds = ["pip install -r requirements.txt"]
+elif [ "$TARGET" = "website" ]; then
+  REPO="INDEX"
+  echo "▶ Cloning ${REPO}..."
+  git clone --depth 1 "https://x-access-token:${GITHUB_TOKEN}@github.com/shadyy000777-commits/${REPO}" "$TMPDIR" -q
+  git_cfg
 
-[start]
-cmd = "python main.py"
-EOF
+  # Copy website files — only those that exist locally
+  for f in railway_server.py Procfile railway.json nixpacks.toml runtime.txt; do
+    [ -e "$f" ] && cp "$f" "$TMPDIR/$f" && echo "  copied $f"
+  done
+  [ -d "website" ] && cp -r website/. "$TMPDIR/website/" && echo "  copied website/"
 
-# Remove website-only files from the repo clone so Railway stops using them
-cd "$TMP_DIR"
-for item in $WEBSITE_ONLY; do
-    if [ -e "$item" ] && [ "$item" != "nixpacks.toml" ]; then
-        git rm -rf "$item" 2>/dev/null || true
-    fi
-done
+  git -C "$TMPDIR" add .
+  if ! git -C "$TMPDIR" diff --cached --quiet; then
+    git -C "$TMPDIR" commit -m "$COMMIT_MSG"
+    git -C "$TMPDIR" push origin main
+    echo "✅ Pushed to ${REPO}."
+  else
+    echo "ℹ️  Nothing new to commit in ${REPO}."
+  fi
 
-git config user.email "aftershock@replit.com"
-git config user.name "Aftershock Bot"
-
-git add -A
-if ! git diff --cached --quiet; then
-    git commit -m "$COMMIT_MSG"
-    git push origin main
-    echo "✅ Pushed to $OWNER/$REPO"
 else
-    echo "ℹ️  Nothing new to commit."
+  echo "❌  Usage: bash push_to_github.sh <bot|website> \"commit message\""
+  echo ""
+  echo "  bot     → pushes main.py, config.py, requirements.txt, etc. to Discord-bot"
+  echo "  website → pushes website/, railway_server.py, etc. to INDEX"
+  exit 1
 fi
-
-cd "$BASE_DIR"
-rm -rf "$TMP_DIR"
-trap - EXIT

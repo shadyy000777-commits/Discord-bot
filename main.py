@@ -95,7 +95,7 @@ async def _pull_data_from_github() -> bool:
 
 
 async def _init_db():
-    """Create tiers_data table if it doesn't exist."""
+    """Create tiers_data and tester_stats tables if they don't exist."""
     db_url = os.getenv("DATABASE_URL")
     if not db_url:
         print("[DB] No DATABASE_URL — skipping DB init")
@@ -111,8 +111,24 @@ async def _init_db():
                 updated_at TIMESTAMPTZ DEFAULT NOW()
             )
         """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS tester_stats (
+                id        SERIAL PRIMARY KEY,
+                discord_id   TEXT NOT NULL,
+                tester_name  TEXT NOT NULL,
+                result       TEXT NOT NULL,
+                gamemode     TEXT NOT NULL,
+                tested_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_ts_discord_id ON tester_stats(discord_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_ts_tested_at ON tester_stats(tested_at)
+        """)
         await conn.close()
-        print("[DB] Table ready ✅")
+        print("[DB] Tables ready ✅")
     except Exception as e:
         print(f"[DB] Init error: {e}")
 
@@ -135,6 +151,23 @@ async def _push_data_to_db(data: dict):
         print("[DB sync] tiers_data updated ✅")
     except Exception as e:
         print(f"[DB sync] Error: {e}")
+
+
+async def _record_tester_test(discord_id: str, tester_name: str, result: str, gamemode: str, tested_at: str):
+    """Insert one row into tester_stats for every submittest invocation."""
+    db_url = os.getenv("DATABASE_URL")
+    if not db_url:
+        return
+    db_url = db_url.replace("postgres://", "postgresql://", 1)
+    try:
+        conn = await asyncpg.connect(db_url)
+        await conn.execute("""
+            INSERT INTO tester_stats (discord_id, tester_name, result, gamemode, tested_at)
+            VALUES ($1, $2, $3, $4, $5::timestamptz)
+        """, discord_id, tester_name, result, gamemode, tested_at)
+        await conn.close()
+    except Exception as e:
+        print(f"[DB] tester_stats insert error: {e}")
 
 
 async def _push_data_to_github():
@@ -1271,6 +1304,15 @@ async def submittest(
 
     await save_data(data)
 
+    # Record tester activity in DB (fire-and-forget)
+    asyncio.create_task(_record_tester_test(
+        str(interaction.user.id),
+        tester_name,
+        result.value,
+        gamemode,
+        test["tested_at"],
+    ))
+
     # Send embed immediately — no waiting on Discord API calls
     rank_earned = tested_tier if result.value == "passed" else "—"
     embed = discord.Embed(
@@ -1724,6 +1766,101 @@ async def leaderboard(interaction: discord.Interaction, gamemode: str):
     embed.description = "\n".join(lines)
     embed.set_footer(text=f"Total players in {gamemode}: {len(ranked)}")
     await interaction.response.send_message(embed=embed)
+
+
+@tree.command(name="testerstats", description="Show tester leaderboard — who has submitted the most tests")
+@app_commands.describe(member="Optional: view stats for a specific tester (leave blank for full leaderboard)")
+async def testerstats(interaction: discord.Interaction, member: discord.Member = None):
+    await interaction.response.defer()
+
+    db_url = os.getenv("DATABASE_URL")
+    if not db_url:
+        await interaction.followup.send("❌ No database connected — tester stats unavailable.", ephemeral=True)
+        return
+
+    db_url_pg = db_url.replace("postgres://", "postgresql://", 1)
+    try:
+        conn = await asyncpg.connect(db_url_pg)
+
+        if member:
+            # ── Single tester view ──────────────────────────────────────────
+            did = str(member.id)
+            total = await conn.fetchval(
+                "SELECT COUNT(*) FROM tester_stats WHERE discord_id = $1", did)
+            week = await conn.fetchval(
+                "SELECT COUNT(*) FROM tester_stats WHERE discord_id = $1 AND tested_at >= NOW() - INTERVAL '7 days'", did)
+            month = await conn.fetchval(
+                "SELECT COUNT(*) FROM tester_stats WHERE discord_id = $1 AND tested_at >= date_trunc('month', NOW())", did)
+            passed = await conn.fetchval(
+                "SELECT COUNT(*) FROM tester_stats WHERE discord_id = $1 AND result = 'passed'", did)
+            failed = await conn.fetchval(
+                "SELECT COUNT(*) FROM tester_stats WHERE discord_id = $1 AND result = 'failed'", did)
+            voided = await conn.fetchval(
+                "SELECT COUNT(*) FROM tester_stats WHERE discord_id = $1 AND result = 'voided'", did)
+            gm_rows = await conn.fetch(
+                "SELECT gamemode, COUNT(*) AS cnt FROM tester_stats WHERE discord_id = $1 GROUP BY gamemode ORDER BY cnt DESC LIMIT 5", did)
+            await conn.close()
+
+            embed = discord.Embed(
+                title=f"📊 Tester Stats — {member.display_name}",
+                color=discord.Color.purple(),
+            )
+            embed.set_thumbnail(url=member.display_avatar.url)
+            embed.add_field(name="Total Tests", value=f"**{total}**", inline=True)
+            embed.add_field(name="This Week", value=f"**{week}**", inline=True)
+            embed.add_field(name="This Month", value=f"**{month}**", inline=True)
+            embed.add_field(name="✅ Passed", value=str(passed), inline=True)
+            embed.add_field(name="❌ Failed", value=str(failed), inline=True)
+            embed.add_field(name="⬜ Voided", value=str(voided), inline=True)
+            if gm_rows:
+                gm_lines = "\n".join(f"`{r['gamemode']}` — {r['cnt']}" for r in gm_rows)
+                embed.add_field(name="Top Gamemodes", value=gm_lines, inline=False)
+        else:
+            # ── Full leaderboard view ───────────────────────────────────────
+            rows = await conn.fetch("""
+                SELECT
+                    discord_id,
+                    COUNT(*) AS total,
+                    SUM(CASE WHEN tested_at >= NOW() - INTERVAL '7 days'       THEN 1 ELSE 0 END) AS week,
+                    SUM(CASE WHEN tested_at >= date_trunc('month', NOW())       THEN 1 ELSE 0 END) AS month,
+                    SUM(CASE WHEN result = 'passed' THEN 1 ELSE 0 END)         AS passed,
+                    SUM(CASE WHEN result = 'failed' THEN 1 ELSE 0 END)         AS failed,
+                    SUM(CASE WHEN result = 'voided' THEN 1 ELSE 0 END)         AS voided,
+                    MAX(tester_name) AS tester_name
+                FROM tester_stats
+                GROUP BY discord_id
+                ORDER BY total DESC
+                LIMIT 15
+            """)
+            await conn.close()
+
+            if not rows:
+                await interaction.followup.send("No tester data recorded yet.", ephemeral=True)
+                return
+
+            embed = discord.Embed(
+                title="🏅 Tester Leaderboard",
+                description="Most tests submitted by each tester",
+                color=discord.Color.gold(),
+            )
+            medals = ["🥇", "🥈", "🥉"]
+            lines = []
+            for i, r in enumerate(rows):
+                medal = medals[i] if i < 3 else f"`{i+1}.`"
+                mention = f"<@{r['discord_id']}>"
+                lines.append(
+                    f"{medal} {mention} — **{r['total']}** total "
+                    f"| {r['week']} this week | {r['month']} this month "
+                    f"| ✅{r['passed']} ❌{r['failed']} ⬜{r['voided']}"
+                )
+            embed.description = "\n".join(lines)
+            embed.set_footer(text="Tracks tests submitted via /submittest • Stats update live")
+
+        await interaction.followup.send(embed=embed)
+
+    except Exception as e:
+        print(f"[testerstats] Error: {e}")
+        await interaction.followup.send("❌ Failed to fetch tester stats. Try again shortly.", ephemeral=True)
 
 
 @tree.command(name="tierlist", description="Show all players grouped by tier for a specific gamemode")
