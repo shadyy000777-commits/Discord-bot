@@ -1328,14 +1328,12 @@ async def submittest(
     embed.add_field(name="Rank Earned", value=f"{rank_earned}\n\u200b", inline=False)
     if notes:
         embed.add_field(name="Notes", value=f"{notes}\n\u200b", inline=False)
-    # Fetch body render, crop to upper 55% (head + torso) for thumbnail
+    # Fetch full body render at high resolution — portrait image fills Discord's thumbnail column
     skin_file = None
-    skin_img = await _fetch_img(f"https://crafatar.com/renders/body/{username}?scale=4&overlay")
+    skin_img = await _fetch_img(f"https://crafatar.com/renders/body/{username}?scale=10&overlay")
     if skin_img is None:
-        skin_img = await _fetch_img(f"https://mc-heads.net/body/{username}/128")
+        skin_img = await _fetch_img(f"https://mc-heads.net/body/{username}/300")
     if skin_img:
-        w, h = skin_img.size
-        skin_img = skin_img.crop((0, 0, w, int(h * 0.55)))
         buf = io.BytesIO()
         skin_img.save(buf, format="PNG")
         buf.seek(0)
