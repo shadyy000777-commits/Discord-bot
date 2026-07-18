@@ -1321,13 +1321,13 @@ async def submittest(
         title=f"{username} TEST RESULTS 🏆",
         color=discord.Color(0xfa0607),
     )
-    embed.add_field(name="Player Name", value=f"{username}\n\u200b", inline=False)
-    embed.add_field(name="Tester Name", value=f"{tester_name}\n\u200b", inline=False)
-    embed.add_field(name="Game Mode",   value=f"{gamemode}\n\u200b",   inline=False)
-    embed.add_field(name="Rank Before", value=f"{rank_before}\n\u200b", inline=False)
-    embed.add_field(name="Rank Earned", value=f"{rank_earned}\n\u200b", inline=False)
+    embed.add_field(name="Player Name", value=username, inline=False)
+    embed.add_field(name="Tester Name", value=tester_name, inline=False)
+    embed.add_field(name="Game Mode",   value=gamemode,    inline=False)
+    embed.add_field(name="Rank Before", value=rank_before, inline=False)
+    embed.add_field(name="Rank Earned", value=rank_earned, inline=False)
     if notes:
-        embed.add_field(name="Notes", value=f"{notes}\n\u200b", inline=False)
+        embed.add_field(name="Notes", value=notes, inline=False)
     embed.set_thumbnail(url=f"https://crafatar.com/renders/head/{username}?scale=10&overlay&default=MHF_Steve")
 
     await interaction.followup.send(content=f"**{username}**", embed=embed)
