@@ -1,5 +1,5 @@
-[phases.install]
-cmds = ["pip install -r requirements.txt"]
+[variables]
+NIXPACKS_PYTHON_VERSION = "3.12"
 
 [start]
-cmd = "python main.py"
+cmd = "python3 railway_server.py"

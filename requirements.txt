@@ -5,5 +5,3 @@ Pillow
 pilmoji
 flask
 waitress
-watchdog
-asyncpg

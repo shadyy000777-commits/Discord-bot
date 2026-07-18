@@ -1,78 +1,114 @@
 #!/bin/bash
-# Usage:
-#   bash push_to_github.sh bot     "commit message"   → pushes to Discord-bot
-#   bash push_to_github.sh website "commit message"   → pushes to INDEX
+# Smart push: bot changes → Discord-bot repo, website changes → INDEX repo
+# Never pushes to AFTERSHOCK-TIERS (that's Railway's auto-deploy source).
 set -e
 
-TARGET="${1:-}"
-COMMIT_MSG="${2:-Update from Replit}"
-
-if [[ "$TARGET" != "bot" && "$TARGET" != "website" ]]; then
-    echo "Usage: bash push_to_github.sh <bot|website> \"commit message\""
-    echo "  bot     → pushes bot code to shadyy000777-commits/Discord-bot"
-    echo "  website → pushes website files to shadyy000777-commits/INDEX"
+if [ -z "$GITHUB_TOKEN" ]; then
+    echo "❌ GITHUB_TOKEN is not set. Add it as a Replit secret."
     exit 1
 fi
 
-git config credential.helper store
-git config user.email "aftershock@replit.com"
-git config user.name "Aftershock Bot"
+COMMIT_MSG="${1:-Update from Replit}"
+OWNER="shadyy000777-commits"
+BOT_REPO="Discord-bot"
+WEB_REPO="INDEX"
+AUTH_URL_BASE="https://x-access-token:${GITHUB_TOKEN}@github.com/${OWNER}"
 
-if [[ "$TARGET" == "bot" ]]; then
-    REPO="Discord-bot"
-    FILES="main.py config.py requirements.txt push_to_github.sh replit.md"
-    echo "▶ Pushing bot changes to $REPO..."
-else
-    REPO="INDEX"
-    FILES="railway_server.py Procfile railway.json nixpacks.toml runtime.txt requirements-web.txt website/index.html website/static"
-    COPY_AS_REQUIREMENTS=1
-    echo "▶ Pushing website changes to $REPO..."
-fi
+# ── File categories ──────────────────────────────────────────────────────────
+# Files that belong to the bot repo
+BOT_FILES=(
+    main.py
+    config.py
+    requirements.txt
+    requirements-web.txt
+    runtime.txt
+    Procfile
+    railway.json
+    railway_server.py
+    push_to_github.sh
+    replit.md
+)
+# Optional bot files (only copied if they exist)
+BOT_FILES_OPTIONAL=(nixpacks.toml)
 
-# Use a temp worktree so we never touch the local working tree
-TMPDIR_WORK=$(mktemp -d)
-trap "rm -rf $TMPDIR_WORK" EXIT
+# Directories / files that belong to the website repo
+WEB_DIRS=(website)
 
-REMOTE_URL="https://x-access-token:${GITHUB_TOKEN}@github.com/shadyy000777-commits/${REPO}"
+# ── Helpers ──────────────────────────────────────────────────────────────────
+clone_and_push() {
+    local label="$1"
+    local repo="$2"
+    local tmp_dir="$3"
+    local copy_fn="$4"   # name of a shell function that copies files into $tmp_dir
 
-# Clone only the target repo into the temp dir (shallow, fast)
-git clone --depth=1 "$REMOTE_URL" "$TMPDIR_WORK/repo" 2>&1
+    echo ""
+    echo "▶ Checking ${label} (${repo})..."
 
-# Copy the relevant files into the temp clone
-for item in $FILES; do
-    if [[ -e "$item" ]]; then
-        dest="$TMPDIR_WORK/repo/$item"
-        if [[ -d "$item" ]]; then
-            # For directories: copy contents INTO dest (not dest/dirname)
-            mkdir -p "$dest"
-            cp -r "$item"/. "$dest/"
-        else
-            mkdir -p "$(dirname "$dest")"
-            cp "$item" "$dest"
-        fi
-        echo "  copied $item"
+    # Clone (quiet, depth 1 for speed)
+    git clone --depth 1 --quiet "${AUTH_URL_BASE}/${repo}.git" "$tmp_dir" 2>/dev/null || {
+        echo "  ⚠️  Could not clone ${repo}. Check GITHUB_TOKEN permissions."
+        return 1
+    }
+
+    pushd "$tmp_dir" > /dev/null
+    git config user.email "aftershock@replit.com"
+    git config user.name "Aftershock Bot"
+    popd > /dev/null
+
+    # Copy the relevant files from the working directory into the clone
+    "$copy_fn" "$tmp_dir"
+
+    pushd "$tmp_dir" > /dev/null
+    git add -A
+
+    if git diff --cached --quiet; then
+        echo "  ℹ️  No changes in ${label} — nothing to push."
     else
-        echo "  ⚠ skipped $item (not found locally)"
+        git commit -m "$COMMIT_MSG"
+        git push origin HEAD --quiet
+        echo "  ✅ Pushed ${label} changes to ${OWNER}/${repo}"
     fi
-done
+    popd > /dev/null
+}
 
-# Commit and push from the temp clone
-cd "$TMPDIR_WORK/repo"
-git add -- $FILES
-if ! git diff --cached --quiet; then
-    git commit -m "$COMMIT_MSG"
-    echo "✅ Committed: $COMMIT_MSG"
-else
-    echo "ℹ️  Nothing new to commit."
-fi
+# ── Copy functions ────────────────────────────────────────────────────────────
+copy_bot_files() {
+    local dest="$1"
+    local src
+    src="$(pwd)"   # Replit project root (we're not cd'd away yet)
 
-# For the website repo, also copy requirements-web.txt as requirements.txt
-# so nixpacks auto-detects it without needing a custom pip install command
-if [[ "${COPY_AS_REQUIREMENTS:-}" == "1" && -e "requirements-web.txt" ]]; then
-    cp "requirements-web.txt" "$TMPDIR_WORK/repo/requirements.txt"
-    git add requirements.txt
-    echo "  copied requirements-web.txt → requirements.txt"
-fi
+    for f in "${BOT_FILES[@]}"; do
+        [ -f "${src}/${f}" ] && cp "${src}/${f}" "${dest}/${f}"
+    done
+    for f in "${BOT_FILES_OPTIONAL[@]}"; do
+        [ -f "${src}/${f}" ] && cp "${src}/${f}" "${dest}/${f}"
+    done
+}
 
-git push origin main
-echo "✅ Pushed to $REPO."
+copy_web_files() {
+    local dest="$1"
+    local src
+    src="$(pwd)"
+
+    for d in "${WEB_DIRS[@]}"; do
+        if [ -e "${src}/${d}" ]; then
+            rm -rf "${dest:?}/${d}"
+            cp -r "${src}/${d}" "${dest}/${d}"
+        fi
+    done
+}
+
+# ── Main ──────────────────────────────────────────────────────────────────────
+PROJECT_ROOT="$(pwd)"
+TMP_BOT="$(mktemp -d)"
+TMP_WEB="$(mktemp -d)"
+trap 'rm -rf "$TMP_BOT" "$TMP_WEB"' EXIT
+
+# We stay in the project root so copy functions can reference it
+cd "$PROJECT_ROOT"
+
+clone_and_push "Bot code" "$BOT_REPO" "$TMP_BOT" copy_bot_files
+clone_and_push "Website"  "$WEB_REPO" "$TMP_WEB" copy_web_files
+
+echo ""
+echo "Done."

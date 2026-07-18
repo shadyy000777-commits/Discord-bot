@@ -5,8 +5,8 @@ import datetime
 import io
 import base64
 import asyncio
+import random
 import aiohttp
-import asyncpg
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -31,6 +31,52 @@ GITHUB_REPO      = "My-site"           # Netlify site (original)
 GITHUB_REPO_CODE = "AFTERSHOCK-TIERS"  # Railway / code repo
 GITHUB_REPO_IDX  = "INDEX"             # New Netlify repo
 GITHUB_FILE      = "tiers_data.json"
+
+# ── Random thumbnail pool for /submittest result embeds ───────────────────────
+_HAND_PICKED_SKINS = [
+    # Popular Minecraft icons
+    "https://mc-heads.net/avatar/Dream",
+    "https://mc-heads.net/avatar/Technoblade",
+    "https://mc-heads.net/avatar/DanTDM",
+    "https://mc-heads.net/avatar/TommyInnit",
+    "https://mc-heads.net/avatar/GeorgeNotFound",
+    "https://mc-heads.net/avatar/Sapnap",
+    "https://mc-heads.net/avatar/Grian",
+    "https://mc-heads.net/avatar/MumboJumbo",
+    "https://mc-heads.net/avatar/CaptainSparklez",
+    "https://mc-heads.net/avatar/Purpled",
+    # Mobs & monsters
+    "https://mc-heads.net/avatar/Creeper",
+    "https://mc-heads.net/avatar/Zombie",
+    "https://mc-heads.net/avatar/Enderman",
+    "https://mc-heads.net/avatar/Skeleton",
+    "https://mc-heads.net/avatar/Blaze",
+    "https://mc-heads.net/avatar/Herobrine",
+    "https://mc-heads.net/avatar/Wither",
+    "https://mc-heads.net/avatar/Slime",
+    # Anime & pop culture
+    "https://mc-heads.net/avatar/Luffy",
+    "https://mc-heads.net/avatar/Naruto",
+    "https://mc-heads.net/avatar/Goku",
+    "https://mc-heads.net/avatar/SpiderMan",
+    "https://mc-heads.net/avatar/Batman",
+    "https://mc-heads.net/avatar/Shrek",
+    # Dev legends
+    "https://mc-heads.net/avatar/Notch",
+    "https://mc-heads.net/avatar/jeb_",
+]
+
+def _get_random_minecraft_thumbnail() -> str:
+    """Return a random Minecraft avatar URL for /submittest embeds.
+
+    30 % chance: one of the curated hand-picked skin profiles above.
+    70 % chance: a dynamically generated unique avatar via a random seed
+                 (mc-heads converts unknown names into distinct random heads).
+    """
+    if random.random() < 0.3:
+        return random.choice(_HAND_PICKED_SKINS)
+    seed = random.randint(0, 999_999)
+    return f"https://mc-heads.net/avatar/skin_{seed}"
 
 
 async def _push_content_to_repo(session: aiohttp.ClientSession, repo: str,
@@ -92,85 +138,6 @@ async def _pull_data_from_github() -> bool:
     except Exception as e:
         print(f"[GitHub pull] Error: {e}")
         return False
-
-
-async def _init_db():
-    """Create tiers_data and tester_stats tables if they don't exist."""
-    db_url = os.getenv("DATABASE_URL")
-    if not db_url:
-        print("[DB] No DATABASE_URL — skipping DB init")
-        return
-    # asyncpg requires postgresql://, Railway provides postgres://
-    db_url = db_url.replace("postgres://", "postgresql://", 1)
-    try:
-        conn = await asyncpg.connect(db_url)
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS tiers_data (
-                id INTEGER PRIMARY KEY DEFAULT 1,
-                data JSONB NOT NULL,
-                updated_at TIMESTAMPTZ DEFAULT NOW()
-            )
-        """)
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS tester_stats (
-                id        SERIAL PRIMARY KEY,
-                discord_id   TEXT NOT NULL,
-                tester_name  TEXT NOT NULL,
-                result       TEXT NOT NULL,
-                gamemode     TEXT NOT NULL,
-                tested_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            )
-        """)
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_ts_discord_id ON tester_stats(discord_id)
-        """)
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_ts_tested_at ON tester_stats(tested_at)
-        """)
-        await conn.close()
-        print("[DB] Tables ready ✅")
-    except Exception as e:
-        print(f"[DB] Init error: {e}")
-
-
-async def _push_data_to_db(data: dict):
-    """Upsert full tiers_data to the shared PostgreSQL database (instant — no GitHub lag)."""
-    db_url = os.getenv("DATABASE_URL")
-    if not db_url:
-        return
-    # asyncpg requires postgresql://, Railway provides postgres://
-    db_url = db_url.replace("postgres://", "postgresql://", 1)
-    try:
-        conn = await asyncpg.connect(db_url)
-        await conn.execute("""
-            INSERT INTO tiers_data (id, data, updated_at)
-            VALUES (1, $1::jsonb, NOW())
-            ON CONFLICT (id) DO UPDATE SET data = $1::jsonb, updated_at = NOW()
-        """, json.dumps(data))
-        await conn.close()
-        print("[DB sync] tiers_data updated ✅")
-    except Exception as e:
-        print(f"[DB sync] Error: {e}")
-
-
-async def _record_tester_test(discord_id: str, tester_name: str, result: str, gamemode: str):
-    """Insert one row into tester_stats for every submittest invocation."""
-    db_url = os.getenv("DATABASE_URL")
-    if not db_url:
-        print("[DB] tester_stats: no DATABASE_URL — skipping")
-        return
-    db_url = db_url.replace("postgres://", "postgresql://", 1)
-    try:
-        conn = await asyncpg.connect(db_url)
-        await conn.execute("""
-            INSERT INTO tester_stats (discord_id, tester_name, result, gamemode, tested_at)
-            VALUES ($1, $2, $3, $4, $5)
-        """, discord_id, tester_name, result, gamemode,
-            datetime.datetime.utcnow().replace(tzinfo=datetime.timezone.utc))
-        await conn.close()
-        print(f"[DB] tester_stats recorded: {tester_name} ({discord_id}) {result} {gamemode} ✅")
-    except Exception as e:
-        print(f"[DB] tester_stats insert error: {e}")
 
 
 async def _push_data_to_github():
@@ -260,21 +227,22 @@ def load_data() -> dict:
 
 
 async def save_data(data: dict):
-    """Write locally, push to DB (instant), and push to GitHub in background."""
+    """Write locally, then push to GitHub and WAIT for it to finish.
+
+    Previously this fired the GitHub push as a background task and returned
+    immediately, so the command could report success to Discord before the
+    data was actually safe on GitHub. If the process restarted/redeployed in
+    that window (e.g. right after a code deploy), the push never completed
+    and the test silently vanished with no error anywhere. Awaiting it here
+    means: by the time the command's success message is sent, the data is
+    already confirmed on GitHub — a redeploy after that point can't lose it.
+    """
     with open(DATA_FILE, "w") as f:
         json.dump(data, f, indent=2)
-    # DB push — fast, await it so data is live immediately
     try:
-        await _push_data_to_db(data)
+        await _push_data_to_github()
     except Exception as e:
-        print(f"[save_data] DB push failed: {e}")
-    # GitHub push — slow, fire and forget so command responds instantly
-    async def _bg_github():
-        try:
-            await _push_data_to_github()
-        except Exception as e:
-            print(f"[save_data] GitHub push failed: {e}")
-    asyncio.create_task(_bg_github())
+        print(f"[save_data] GitHub push failed: {e}")
 
 
 STAFF_COMMANDS = [
@@ -976,9 +944,6 @@ async def on_ready():
     print(f"Total guilds synced: {len(synced_guilds)}")
     print("------")
 
-    # Init shared database table
-    await _init_db()
-
     # Pull latest player data from GitHub first so this instance always boots
     # with the most current data (critical for Railway which resets local files on redeploy)
     await _pull_data_from_github()
@@ -1220,6 +1185,7 @@ class RemoveRoleView(discord.ui.View):
     tested_tier="Tier that was tested (e.g. HT1, LT3)",
     result="Result of the test",
     notes="Optional notes about the test",
+    image_url="Optional image URL to use as the embed thumbnail",
 )
 @app_commands.choices(result=[
     app_commands.Choice(name="Passed", value="passed"),
@@ -1235,15 +1201,19 @@ async def submittest(
     tested_tier: str,
     result: app_commands.Choice[str],
     notes: str = "",
+    image_url: str = "",
 ):
-    await interaction.response.defer()
     tested_tier = tested_tier.upper().strip()
     if tested_tier not in TIERS:
         valid = ", ".join(TIERS)
-        await interaction.followup.send(
+        await interaction.response.send_message(
             f"❌ Invalid tier `{tested_tier}`. Valid tiers: {valid}", ephemeral=True
         )
         return
+
+    # Defer immediately — save_data awaits a GitHub push and role removal
+    # hits the Discord API, both of which can exceed Discord's 3-second timeout.
+    await interaction.response.defer()
 
     data = load_data()
     gm_key = gamemode.lower()
@@ -1307,84 +1277,59 @@ async def submittest(
 
     await save_data(data)
 
-    # Record tester activity — await directly (interaction already deferred, no timeout risk)
-    await _record_tester_test(
-        str(interaction.user.id),
-        tester_name,
-        result.value,
-        gamemode,
-    )
-
-    # Send embed immediately — no waiting on Discord API calls
-    rank_earned = tested_tier if result.value == "passed" else "—"
-    embed = discord.Embed(
-        title=f"{username} TEST RESULTS 🏆",
-        color=discord.Color(0xfa0607),
-    )
-    embed.add_field(name="Player Name", value=username, inline=False)
-    embed.add_field(name="Tester Name", value=tester_name, inline=False)
-    embed.add_field(name="Game Mode",   value=gamemode,    inline=False)
-    embed.add_field(name="Rank Before", value=rank_before, inline=False)
-    embed.add_field(name="Rank Earned", value=rank_earned, inline=False)
-    if notes:
-        embed.add_field(name="Notes", value=notes, inline=False)
-    # Fetch body render, crop to upper 55% (head + torso) and attach as thumbnail
-    skin_file = None
-    skin_img = await _fetch_img(f"https://crafatar.com/renders/body/{username}?scale=4&overlay")
-    if skin_img is None:
-        skin_img = await _fetch_img(f"https://mc-heads.net/body/{username}/128")
-    if skin_img:
-        w, h = skin_img.size
-        skin_img = skin_img.crop((0, 0, w, int(h * 0.55)))
-        buf = io.BytesIO()
-        skin_img.save(buf, format="PNG")
-        buf.seek(0)
-        skin_file = discord.File(buf, filename="skin.png")
-        embed.set_thumbnail(url="attachment://skin.png")
-
-    if skin_file:
-        await interaction.followup.send(content=f"**{username}**", embed=embed, file=skin_file)
-    else:
-        await interaction.followup.send(content=f"**{username}**", embed=embed)
-
-    # Role removal in background — never blocks the response
-    async def _remove_role_bg():
-        if not interaction.guild:
-            return
+    # Remove gamemode role from the player after their test result is uploaded
+    role_removed = None
+    target_member = None
+    target_role = None
+    if interaction.guild:
         try:
+            # Find the player's Discord ID by matching their Minecraft username in profiles
             discord_id = None
             for uid, profile in data.get("profiles", {}).items():
                 if profile.get("minecraft_username", "").lower() == username.lower():
                     discord_id = int(uid)
                     break
-            if not discord_id:
-                return
-            gm_roles = data.get("gamemode_roles", {})
-            matched_role_id = next(
-                (rid for gm, rid in gm_roles.items() if gm.lower() == gamemode.lower()), None
-            )
-            if not matched_role_id:
-                return
-            role = interaction.guild.get_role(int(matched_role_id))
-            if role is None:
-                all_roles = await interaction.guild.fetch_roles()
-                role = next((r for r in all_roles if r.id == int(matched_role_id)), None)
-            if not role:
-                return
-            try:
-                member = await interaction.guild.fetch_member(discord_id)
-            except discord.NotFound:
-                return
-            if role in member.roles:
-                await member.remove_roles(role, reason=f"Test submitted for {gamemode}")
-                print(f"[submittest] Removed role {role.name} from {username}")
-        except discord.Forbidden:
-            print(f"[submittest] No permission to remove role from {username}")
-        except Exception as e:
-            print(f"[submittest] Role removal error: {e}")
 
-    _t = asyncio.create_task(_remove_role_bg())
-    _t.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
+            print(f"[submittest] username={username!r} gamemode={gamemode!r} discord_id={discord_id}")
+
+            if discord_id:
+                # Match gamemode case-insensitively against gamemode_roles keys
+                gm_roles = data.get("gamemode_roles", {})
+                matched_role_id = None
+                for gm_name, rid in gm_roles.items():
+                    if gm_name.lower() == gamemode.lower():
+                        matched_role_id = rid
+                        break
+
+                print(f"[submittest] gamemode_roles keys={list(gm_roles.keys())} matched_role_id={matched_role_id}")
+
+                # Resolve role — get_role uses cache; fall back to fetching all roles if needed
+                if matched_role_id:
+                    target_role = interaction.guild.get_role(int(matched_role_id))
+                    if target_role is None:
+                        all_roles = await interaction.guild.fetch_roles()
+                        target_role = next((r for r in all_roles if r.id == int(matched_role_id)), None)
+
+                    print(f"[submittest] target_role={target_role}")
+
+                    # fetch_member makes an API call so it works even if not cached
+                    try:
+                        target_member = await interaction.guild.fetch_member(discord_id)
+                    except discord.NotFound:
+                        target_member = None
+
+                    print(f"[submittest] target_member={target_member} roles={[r.name for r in target_member.roles] if target_member else None}")
+
+                    if target_role and target_member and target_role in target_member.roles:
+                        await target_member.remove_roles(target_role, reason=f"Test result submitted for {gamemode}")
+                        role_removed = target_role.name
+                        print(f"[submittest] Auto-removed role {target_role.name} from {username}")
+            else:
+                print(f"[submittest] No profile found for {username!r} — cannot auto-remove role")
+        except discord.Forbidden:
+            print(f"[submittest] Missing permission to remove gamemode role from {username}")
+        except Exception as re_err:
+            print(f"[submittest] Role removal error: {re_err}")
 
     color_map = {
         "passed": discord.Color.red(),
@@ -1407,13 +1352,13 @@ async def submittest(
         embed.add_field(name="Notes", value=f"{notes}\n\u200b", inline=False)
     if role_removed:
         embed.add_field(name="Role Removed", value=f"🎭 **{role_removed}** removed\n\u200b", inline=False)
+    embed.set_thumbnail(url=image_url.strip() if image_url.strip() else _get_random_minecraft_thumbnail())
+
     view = RemoveRoleView(
         target_role=target_role,
         already_removed=role_removed is not None,
     )
-    await interaction.response.send_message(
-        content=f"**{username}**", embed=embed, view=view,
-    )
+    await interaction.followup.send(content=f"**{username}**", embed=embed, view=view)
 
 
 @tree.command(name="history", description="View tier test history for a player")
@@ -1816,144 +1761,6 @@ async def leaderboard(interaction: discord.Interaction, gamemode: str):
     await interaction.response.send_message(embed=embed)
 
 
-@tree.command(name="debugdb", description="[Admin] Check database connection and tester_stats table")
-async def debugdb(interaction: discord.Interaction):
-    if not interaction.user.guild_permissions.administrator and interaction.user.id != interaction.guild.owner_id:
-        await interaction.response.send_message("❌ Admins only.", ephemeral=True)
-        return
-    await interaction.response.defer(ephemeral=True)
-    db_url = os.getenv("DATABASE_URL")
-    if not db_url:
-        await interaction.followup.send("❌ `DATABASE_URL` is **not set** on this bot service.", ephemeral=True)
-        return
-    db_url_pg = db_url.replace("postgres://", "postgresql://", 1)
-    lines = [f"✅ `DATABASE_URL` is set (`…{db_url[-20:]}`)"]
-    try:
-        conn = await asyncpg.connect(db_url_pg)
-        # Check table exists
-        exists = await conn.fetchval(
-            "SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name='tester_stats')"
-        )
-        lines.append(f"{'✅' if exists else '❌'} `tester_stats` table exists: **{exists}**")
-        if exists:
-            count = await conn.fetchval("SELECT COUNT(*) FROM tester_stats")
-            lines.append(f"📊 Rows in `tester_stats`: **{count}**")
-            # Test insert + delete
-            await conn.execute("""
-                INSERT INTO tester_stats (discord_id, tester_name, result, gamemode, tested_at)
-                VALUES ('DEBUG_TEST', 'DEBUG', 'passed', 'DEBUG', $1)
-            """, datetime.datetime.utcnow().replace(tzinfo=datetime.timezone.utc))
-            await conn.execute("DELETE FROM tester_stats WHERE discord_id = 'DEBUG_TEST'")
-            lines.append("✅ Test INSERT + DELETE succeeded")
-        await conn.close()
-    except Exception as e:
-        lines.append(f"❌ DB error: `{e}`")
-    await interaction.followup.send("\n".join(lines), ephemeral=True)
-
-
-@tree.command(name="testerstats", description="Show tester leaderboard — who has submitted the most tests")
-@app_commands.describe(member="Optional: view stats for a specific tester (leave blank for full leaderboard)")
-async def testerstats(interaction: discord.Interaction, member: discord.Member = None):
-    # Defer ephemeral so Discord never shows the "X used /testerstats" banner
-    await interaction.response.defer(ephemeral=True)
-
-    db_url = os.getenv("DATABASE_URL")
-    if not db_url:
-        await interaction.followup.send("❌ No database connected — tester stats unavailable.", ephemeral=True)
-        return
-
-    db_url_pg = db_url.replace("postgres://", "postgresql://", 1)
-    try:
-        conn = await asyncpg.connect(db_url_pg)
-
-        if member:
-            # ── Single tester view ──────────────────────────────────────────
-            did = str(member.id)
-            total = await conn.fetchval(
-                "SELECT COUNT(*) FROM tester_stats WHERE discord_id = $1", did)
-            week = await conn.fetchval(
-                "SELECT COUNT(*) FROM tester_stats WHERE discord_id = $1 AND tested_at >= NOW() - INTERVAL '7 days'", did)
-            month = await conn.fetchval(
-                "SELECT COUNT(*) FROM tester_stats WHERE discord_id = $1 AND tested_at >= date_trunc('month', NOW())", did)
-            passed = await conn.fetchval(
-                "SELECT COUNT(*) FROM tester_stats WHERE discord_id = $1 AND result = 'passed'", did)
-            failed = await conn.fetchval(
-                "SELECT COUNT(*) FROM tester_stats WHERE discord_id = $1 AND result = 'failed'", did)
-            voided = await conn.fetchval(
-                "SELECT COUNT(*) FROM tester_stats WHERE discord_id = $1 AND result = 'voided'", did)
-            gm_rows = await conn.fetch(
-                "SELECT gamemode, COUNT(*) AS cnt FROM tester_stats WHERE discord_id = $1 GROUP BY gamemode ORDER BY cnt DESC LIMIT 5", did)
-            await conn.close()
-
-            embed = discord.Embed(
-                title=f"📊 Tester Stats — {member.display_name}",
-                color=discord.Color.purple(),
-            )
-            embed.set_thumbnail(url=member.display_avatar.url)
-            embed.add_field(name="Total Tests", value=f"**{total}**", inline=True)
-            embed.add_field(name="This Week", value=f"**{week}**", inline=True)
-            embed.add_field(name="This Month", value=f"**{month}**", inline=True)
-            embed.add_field(name="✅ Passed", value=str(passed), inline=True)
-            embed.add_field(name="❌ Failed", value=str(failed), inline=True)
-            embed.add_field(name="⬜ Voided", value=str(voided), inline=True)
-            if gm_rows:
-                gm_lines = "\n".join(f"`{r['gamemode']}` — {r['cnt']}" for r in gm_rows)
-                embed.add_field(name="Top Gamemodes", value=gm_lines, inline=False)
-        else:
-            # ── Full leaderboard view ───────────────────────────────────────
-            rows = await conn.fetch("""
-                SELECT
-                    discord_id,
-                    COUNT(*) AS total,
-                    SUM(CASE WHEN tested_at >= NOW() - INTERVAL '7 days'       THEN 1 ELSE 0 END) AS week,
-                    SUM(CASE WHEN tested_at >= date_trunc('month', NOW())       THEN 1 ELSE 0 END) AS month,
-                    SUM(CASE WHEN result = 'passed' THEN 1 ELSE 0 END)         AS passed,
-                    SUM(CASE WHEN result = 'failed' THEN 1 ELSE 0 END)         AS failed,
-                    SUM(CASE WHEN result = 'voided' THEN 1 ELSE 0 END)         AS voided,
-                    MAX(tester_name) AS tester_name
-                FROM tester_stats
-                GROUP BY discord_id
-                ORDER BY total DESC
-                LIMIT 15
-            """)
-            await conn.close()
-
-            if not rows:
-                await interaction.channel.send("No tester data recorded yet.")
-                await interaction.followup.send("✅", ephemeral=True)
-                return
-
-            embed = discord.Embed(
-                title="🏅 Tester Leaderboard",
-                description="Most tests submitted by each tester",
-                color=discord.Color.gold(),
-            )
-            medals = [
-                "<:emoji_31:1526788415389962310>",
-                "<:emoji_32:1526788682130919488>",
-                "<:emoji_33:1526788720597008385>",
-            ]
-            tester_emoji = "<:emoji_39:1522696411723075654>"
-            lines = []
-            for i, r in enumerate(rows):
-                medal = medals[i] if i < 3 else f"`{i+1}.`"
-                mention = f"<@{r['discord_id']}>"
-                lines.append(
-                    f"{medal} {tester_emoji} {mention} — **{r['total']}** total "
-                    f"| {r['week']} this week | {r['month']} this month"
-                )
-            embed.description = "\n".join(lines)
-            embed.set_footer(text="Tracks tests submitted via /submittest • Stats update live")
-
-        # Send as a plain channel message — no "X used /command" banner
-        await interaction.channel.send(embed=embed)
-        await interaction.followup.send("✅", ephemeral=True)
-
-    except Exception as e:
-        print(f"[testerstats] Error: {e}")
-        await interaction.followup.send("❌ Failed to fetch tester stats. Try again shortly.", ephemeral=True)
-
-
 @tree.command(name="tierlist", description="Show all players grouped by tier for a specific gamemode")
 @app_commands.describe(gamemode="The gamemode to show tier list for (e.g. Crystal, Sword)")
 @require_command_role("tierlist")
@@ -2051,7 +1858,6 @@ async def remove_player(interaction: discord.Interaction, position: int):
 )
 @require_command_role("removetier")
 async def removetier(interaction: discord.Interaction, username: str, gamemode: str):
-    await interaction.response.defer(ephemeral=False)
     data = load_data()
     gm_key = gamemode.lower()
 
@@ -2077,7 +1883,7 @@ async def removetier(interaction: discord.Interaction, username: str, gamemode: 
                 player_key = mention_key
 
     if player_key is None:
-        await interaction.followup.send(
+        await interaction.response.send_message(
             f"❌ No player found with username `{username}`. Check the spelling or use `/leaderboard` to find them.",
             ephemeral=True,
         )
@@ -2090,7 +1896,7 @@ async def removetier(interaction: discord.Interaction, username: str, gamemode: 
         gamemodes = data.get("gamemodes", DEFAULT_GAMEMODES)
         existing = [gm for gm in gamemodes if gm.lower() in player_data and isinstance(player_data.get(gm.lower()), dict) and "tier" in player_data[gm.lower()]]
         existing_str = ", ".join(f"`{g}`" for g in existing) if existing else "*(none)*"
-        await interaction.followup.send(
+        await interaction.response.send_message(
             f"❌ `{username}` has no `{gamemode}` tier to remove.\n**Their current tiers:** {existing_str}",
             ephemeral=True,
         )
@@ -2109,7 +1915,7 @@ async def removetier(interaction: discord.Interaction, username: str, gamemode: 
     embed.add_field(name="Gamemode",  value=f"`{gamemode}`",  inline=True)
     embed.add_field(name="Tier Removed", value=f"`{old_tier}`", inline=True)
     embed.set_footer(text=f"Removed by {interaction.user}")
-    await interaction.followup.send(embed=embed)
+    await interaction.response.send_message(embed=embed)
 
 
 @tree.command(name="panel", description="Post the testing panel with waitlist buttons")
