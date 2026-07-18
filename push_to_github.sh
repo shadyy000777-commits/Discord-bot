@@ -25,6 +25,7 @@ if [[ "$TARGET" == "bot" ]]; then
 else
     REPO="INDEX"
     FILES="railway_server.py Procfile railway.json nixpacks.toml runtime.txt requirements-web.txt website/index.html website/static"
+    COPY_AS_REQUIREMENTS=1
     echo "▶ Pushing website changes to $REPO..."
 fi
 
@@ -63,6 +64,14 @@ if ! git diff --cached --quiet; then
     echo "✅ Committed: $COMMIT_MSG"
 else
     echo "ℹ️  Nothing new to commit."
+fi
+
+# For the website repo, also copy requirements-web.txt as requirements.txt
+# so nixpacks auto-detects it without needing a custom pip install command
+if [[ "${COPY_AS_REQUIREMENTS:-}" == "1" && -e "requirements-web.txt" ]]; then
+    cp "requirements-web.txt" "$TMPDIR_WORK/repo/requirements.txt"
+    git add requirements.txt
+    echo "  copied requirements-web.txt → requirements.txt"
 fi
 
 git push origin main
