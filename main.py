@@ -1291,6 +1291,8 @@ async def submittest(
         title=f"{username} TEST RESULTS 🏆",
         color=discord.Color(0xfa0607),
     )
+    bot_avatar = bot.user.display_avatar.url if bot.user else None
+    embed.set_author(name=bot.user.display_name if bot.user else "AFTERSHOCK TIERS", icon_url=bot_avatar)
     embed.add_field(name="Player Name", value=username,    inline=False)
     embed.add_field(name="Tester Name", value=tester_name, inline=False)
     embed.add_field(name="Game Mode",   value=gamemode,    inline=False)
