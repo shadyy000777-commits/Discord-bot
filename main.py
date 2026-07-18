@@ -1304,14 +1304,14 @@ async def submittest(
 
     await save_data(data)
 
-    # Record tester activity in DB (fire-and-forget)
-    asyncio.create_task(_record_tester_test(
+    # Record tester activity — await directly (interaction already deferred, no timeout risk)
+    await _record_tester_test(
         str(interaction.user.id),
         tester_name,
         result.value,
         gamemode,
         test["tested_at"],
-    ))
+    )
 
     # Send embed immediately — no waiting on Discord API calls
     rank_earned = tested_tier if result.value == "passed" else "—"
@@ -1365,7 +1365,8 @@ async def submittest(
         except Exception as e:
             print(f"[submittest] Role removal error: {e}")
 
-    asyncio.create_task(_remove_role_bg())
+    _t = asyncio.create_task(_remove_role_bg())
+    _t.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
 
 
 @tree.command(name="history", description="View tier test history for a player")
