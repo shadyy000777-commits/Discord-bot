@@ -1367,10 +1367,9 @@ async def submittest(
         except Exception as e:
             print(f"[submittest] Role removal error: {e}")
 
-<<<<<<< Updated upstream
     _t = asyncio.create_task(_remove_role_bg())
     _t.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
-=======
+
     color_map = {
         "passed": discord.Color.red(),
         "failed": discord.Color.red(),
@@ -1411,13 +1410,14 @@ async def submittest(
         target_role=target_role,
         already_removed=role_removed is not None,
     )
-    await interaction.response.send_message(
-        content=f"**{username}**",
-        embed=embed,
-        file=skin_file if skin_file else discord.utils.MISSING,
-        view=view,
-    )
->>>>>>> Stashed changes
+    if skin_file:
+        await interaction.response.send_message(
+            content=f"**{username}**", embed=embed, file=skin_file, view=view,
+        )
+    else:
+        await interaction.response.send_message(
+            content=f"**{username}**", embed=embed, view=view,
+        )
 
 
 @tree.command(name="history", description="View tier test history for a player")
