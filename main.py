@@ -1881,13 +1881,18 @@ async def testerstats(interaction: discord.Interaction, member: discord.Member =
                 description="Most tests submitted by each tester",
                 color=discord.Color.gold(),
             )
-            medals = ["🥇", "🥈", "🥉"]
+            medals = [
+                "<:emoji_31:1526788415389962310>",
+                "<:emoji_32:1526788682130919488>",
+                "<:emoji_33:1526788720597008385>",
+            ]
+            tester_emoji = "<:emoji_39:1522696411723075654>"
             lines = []
             for i, r in enumerate(rows):
                 medal = medals[i] if i < 3 else f"`{i+1}.`"
                 mention = f"<@{r['discord_id']}>"
                 lines.append(
-                    f"{medal} {mention} — **{r['total']}** total "
+                    f"{medal} {tester_emoji} {mention} — **{r['total']}** total "
                     f"| {r['week']} this week | {r['month']} this month "
                     f"| ✅{r['passed']} ❌{r['failed']} ⬜{r['voided']}"
                 )
