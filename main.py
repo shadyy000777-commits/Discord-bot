@@ -1328,14 +1328,20 @@ async def submittest(
     embed.add_field(name="Rank Earned", value=f"{rank_earned}\n\u200b", inline=False)
     if notes:
         embed.add_field(name="Notes", value=f"{notes}\n\u200b", inline=False)
-    # Fetch full body render at high resolution so Discord renders it large in the thumbnail box
+    # Fetch body render, crop to upper 55% (head+torso), then add right padding
+    # so the skin sits on the left side of Discord's thumbnail box instead of the far right edge
     skin_file = None
-    skin_img = await _fetch_img(f"https://crafatar.com/renders/body/{username}?scale=10&overlay")
+    skin_img = await _fetch_img(f"https://crafatar.com/renders/body/{username}?scale=4&overlay")
     if skin_img is None:
-        skin_img = await _fetch_img(f"https://mc-heads.net/body/{username}/256")
+        skin_img = await _fetch_img(f"https://mc-heads.net/body/{username}/128")
     if skin_img:
+        w, h = skin_img.size
+        skin_img = skin_img.crop((0, 0, w, int(h * 0.55)))
+        # Add transparent right padding (~70% extra width) to shift skin leftward in thumbnail
+        padded = Image.new("RGBA", (int(w * 1.7), skin_img.height), (0, 0, 0, 0))
+        padded.paste(skin_img, (0, 0))
         buf = io.BytesIO()
-        skin_img.save(buf, format="PNG")
+        padded.save(buf, format="PNG")
         buf.seek(0)
         skin_file = discord.File(buf, filename="skin.png")
         embed.set_thumbnail(url="attachment://skin.png")
