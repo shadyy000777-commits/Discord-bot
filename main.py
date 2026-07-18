@@ -1809,7 +1809,8 @@ async def debugdb(interaction: discord.Interaction):
 @tree.command(name="testerstats", description="Show tester leaderboard — who has submitted the most tests")
 @app_commands.describe(member="Optional: view stats for a specific tester (leave blank for full leaderboard)")
 async def testerstats(interaction: discord.Interaction, member: discord.Member = None):
-    await interaction.response.defer()
+    # Defer ephemeral so Discord never shows the "X used /testerstats" banner
+    await interaction.response.defer(ephemeral=True)
 
     db_url = os.getenv("DATABASE_URL")
     if not db_url:
@@ -1873,7 +1874,8 @@ async def testerstats(interaction: discord.Interaction, member: discord.Member =
             await conn.close()
 
             if not rows:
-                await interaction.followup.send("No tester data recorded yet.", ephemeral=True)
+                await interaction.channel.send("No tester data recorded yet.")
+                await interaction.followup.send("✅", ephemeral=True)
                 return
 
             embed = discord.Embed(
@@ -1898,7 +1900,9 @@ async def testerstats(interaction: discord.Interaction, member: discord.Member =
             embed.description = "\n".join(lines)
             embed.set_footer(text="Tracks tests submitted via /submittest • Stats update live")
 
-        await interaction.followup.send(embed=embed)
+        # Send as a plain channel message — no "X used /command" banner
+        await interaction.channel.send(embed=embed)
+        await interaction.followup.send("✅", ephemeral=True)
 
     except Exception as e:
         print(f"[testerstats] Error: {e}")
