@@ -1328,22 +1328,10 @@ async def submittest(
     embed.add_field(name="Rank Earned", value=f"{rank_earned}\n\u200b", inline=False)
     if notes:
         embed.add_field(name="Notes", value=f"{notes}\n\u200b", inline=False)
-    # Fetch full body render at high resolution — portrait image fills Discord's thumbnail column
-    skin_file = None
-    skin_img = await _fetch_img(f"https://crafatar.com/renders/body/{username}?scale=10&overlay")
-    if skin_img is None:
-        skin_img = await _fetch_img(f"https://mc-heads.net/body/{username}/300")
-    if skin_img:
-        buf = io.BytesIO()
-        skin_img.save(buf, format="PNG")
-        buf.seek(0)
-        skin_file = discord.File(buf, filename="skin.png")
-        embed.set_thumbnail(url="attachment://skin.png")
+    # Set crafatar body render URL directly — Discord fetches and renders it natively at full size
+    embed.set_thumbnail(url=f"https://crafatar.com/renders/body/{username}?scale=10&overlay&default=MHF_Steve")
 
-    if skin_file:
-        await interaction.followup.send(content=f"**{username}**", embed=embed, file=skin_file)
-    else:
-        await interaction.followup.send(content=f"**{username}**", embed=embed)
+    await interaction.followup.send(content=f"**{username}**", embed=embed)
 
     # Role removal in background — never blocks the response
     async def _remove_role_bg():
