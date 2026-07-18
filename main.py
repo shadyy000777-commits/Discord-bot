@@ -1893,8 +1893,7 @@ async def testerstats(interaction: discord.Interaction, member: discord.Member =
                 mention = f"<@{r['discord_id']}>"
                 lines.append(
                     f"{medal} {tester_emoji} {mention} — **{r['total']}** total "
-                    f"| {r['week']} this week | {r['month']} this month "
-                    f"| ✅{r['passed']} ❌{r['failed']} ⬜{r['voided']}"
+                    f"| {r['week']} this week | {r['month']} this month"
                 )
             embed.description = "\n".join(lines)
             embed.set_footer(text="Tracks tests submitted via /submittest • Stats update live")
