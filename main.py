@@ -4302,15 +4302,39 @@ def api_players_options():
 
 @web_app.route("/tiers_data.json")
 def serve_tiers_data():
-    """Serve raw tiers_data.json so the leaderboard JS can process it client-side."""
-    import os as _os
+    """Serve raw tiers_data.json so the leaderboard JS can process it client-side.
+
+    On a fresh Railway deploy the file may not exist yet (the bot hasn't fired
+    on_ready).  In that case we fetch it synchronously from the GitHub API so
+    the leaderboard always has real data from the very first page load.
+    """
+    import os as _os, urllib.request as _urlreq
     from flask import make_response, send_file, jsonify
+
     if not _os.path.exists(DATA_FILE):
-        # File not yet pulled from GitHub — return empty shell so the page
-        # loads cleanly rather than throwing a 500.
-        resp = make_response(jsonify({"players": {}, "profiles": {}, "gamemodes": []}))
-    else:
-        resp = make_response(send_file(DATA_FILE, mimetype="application/json"))
+        try:
+            token = _os.getenv("GITHUB_TOKEN", "")
+            url = (f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO_CODE}"
+                   f"/contents/{GITHUB_FILE}")
+            req = _urlreq.Request(url, headers={
+                "Accept": "application/vnd.github.v3+json",
+                "User-Agent": "aftershock-bot/1.0",
+                **({"Authorization": f"token {token}"} if token else {}),
+            })
+            with _urlreq.urlopen(req, timeout=8) as r:
+                payload = json.loads(r.read())
+            raw = base64.b64decode(payload["content"].replace("\n", ""))
+            with open(DATA_FILE, "wb") as fh:
+                fh.write(raw)
+            print("[serve_tiers_data] Bootstrapped tiers_data.json from GitHub ✅")
+        except Exception as _e:
+            print(f"[serve_tiers_data] Bootstrap fetch failed: {_e}")
+            resp = make_response(jsonify({"players": {}, "profiles": {}, "gamemodes": []}))
+            resp.headers["Access-Control-Allow-Origin"] = "*"
+            resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+            return resp
+
+    resp = make_response(send_file(DATA_FILE, mimetype="application/json"))
     resp.headers["Access-Control-Allow-Origin"] = "*"
     resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     return resp
@@ -4329,12 +4353,6 @@ def run_bot():
     bot.run(TOKEN)
 
 if __name__ == "__main__":
-    # Pull the latest tiers_data.json from GitHub before anything else so the
-    # web server always has real data from the first request — even on a fresh
-    # Railway deploy where the file isn't committed to the repo.
-    print("[startup] Pulling tiers_data.json from GitHub before starting servers…")
-    asyncio.run(_pull_data_from_github())
-
     # DISABLE_DISCORD_BOT is set only in this Replit workspace's env — Railway's
     # separate bot service (deployed from the Discord-bot repo) does not have it,
     # so this only stops the bot here, never in production. This avoids running
