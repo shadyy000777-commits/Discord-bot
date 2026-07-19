@@ -1199,6 +1199,7 @@ async def submittest(
         "result": result.value,
         "notes": notes,
         "judged_by": str(interaction.user),
+        "judged_by_id": str(interaction.user.id),
         "tested_at": datetime.datetime.utcnow().isoformat(),
     }
     data["tests"].append(test)
@@ -1372,18 +1373,22 @@ async def testerstats(interaction: discord.Interaction):
     week_ago  = now - datetime.timedelta(days=7)
     month_ago = now - datetime.timedelta(days=30)
 
+    # Key by (judged_by_id if present, else judged_by) so we can mention properly
     counts: dict[str, dict] = {}
     for t in tests:
-        judge = t.get("judged_by", "Unknown")
-        if judge not in counts:
-            counts[judge] = {"total": 0, "week": 0, "month": 0}
-        counts[judge]["total"] += 1
+        uid  = t.get("judged_by_id")
+        name = t.get("judged_by", "Unknown")
+        key  = uid if uid else name
+        if key not in counts:
+            counts[key] = {"total": 0, "week": 0, "month": 0,
+                           "mention": f"<@{uid}>" if uid else f"@{name}"}
+        counts[key]["total"] += 1
         try:
             ts = datetime.datetime.fromisoformat(t["tested_at"])
             if ts >= week_ago:
-                counts[judge]["week"] += 1
+                counts[key]["week"] += 1
             if ts >= month_ago:
-                counts[judge]["month"] += 1
+                counts[key]["month"] += 1
         except (KeyError, ValueError):
             pass
 
@@ -1400,14 +1405,14 @@ async def testerstats(interaction: discord.Interaction):
     ]
     tester_emoji = "<:emoji_39:1522696411723075654>"
     lines = []
-    for i, (judge, c) in enumerate(sorted_testers):
+    for i, (key, c) in enumerate(sorted_testers):
         medal = medals[i] if i < 3 else f"**{i+1}.**"
         lines.append(
-            f"{medal} {tester_emoji} @{judge} — **{c['total']}** total | **{c['week']}** this week | **{c['month']}** this month"
+            f"{medal} {tester_emoji} {c['mention']} — **{c['total']}** total | **{c['week']}** this week | **{c['month']}** this month"
         )
 
     embed = discord.Embed(
-        title="🥇 Tester Leaderboard",
+        title="<:emoji_34:1526820367698493500> Tester Leaderboard",
         description="\n".join(lines),
         color=discord.Color.gold(),
     )
