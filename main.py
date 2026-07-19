@@ -1804,6 +1804,7 @@ async def tierlist(interaction: discord.Interaction, gamemode: str):
 @app_commands.describe(position="The player's rank position on the website leaderboard (e.g. 1, 2, 3)")
 @require_command_role("remove")
 async def remove_player(interaction: discord.Interaction, position: int):
+    await interaction.response.defer()
     data = load_data()
     gamemodes = data.get("gamemodes", DEFAULT_GAMEMODES)
     profiles = data.get("profiles", {})
@@ -1846,7 +1847,7 @@ async def remove_player(interaction: discord.Interaction, position: int):
     sorted_players = sorted(player_scores.items(), key=lambda x: -x[1][1])
 
     if position < 1 or position > len(sorted_players):
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"❌ Position **{position}** is out of range. There are **{len(sorted_players)}** players on the leaderboard.",
             ephemeral=True,
         )
@@ -1862,7 +1863,7 @@ async def remove_player(interaction: discord.Interaction, position: int):
     embed.add_field(name="Player", value=display_name, inline=True)
     embed.add_field(name="Points", value=f"{pts} pts", inline=True)
     embed.set_footer(text=f"Removed by {interaction.user}")
-    await interaction.response.send_message(embed=embed)
+    await interaction.followup.send(embed=embed)
 
 
 @tree.command(name="removetier", description="Remove a player's tier for a specific gamemode from the leaderboard")
@@ -2854,6 +2855,7 @@ async def pointsto(interaction: discord.Interaction, member: discord.Member, amo
 )
 @require_command_role("point")
 async def point_cmd(interaction: discord.Interaction, member: discord.Member, amount: int, reason: str = ""):
+    await interaction.response.defer()
     data = load_data()
     profile = data.get("profiles", {}).get(str(member.id))
     mc_username = profile.get("minecraft_username") if profile else None
@@ -2899,7 +2901,7 @@ async def point_cmd(interaction: discord.Interaction, member: discord.Member, am
         embed.add_field(name="Reason", value=reason, inline=False)
     embed.set_thumbnail(url=member.display_avatar.url)
     embed.set_footer(text=f"Updated by {interaction.user} • Rank thresholds: Rookie 1+ | Combat Cadet 75+ | Combat Specialist 175+ | Combat Ace 300+ | Combat Master 500+ | Conquered 700+")
-    await interaction.response.send_message(embed=embed)
+    await interaction.followup.send(embed=embed)
 
 
 @settier.error
