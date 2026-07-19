@@ -1818,6 +1818,7 @@ async def remove_player(interaction: discord.Interaction, position: int):
 )
 @require_command_role("removetier")
 async def removetier(interaction: discord.Interaction, username: str, gamemode: str):
+    await interaction.response.defer()
     data = load_data()
     gm_key = gamemode.lower()
 
@@ -1843,7 +1844,7 @@ async def removetier(interaction: discord.Interaction, username: str, gamemode: 
                 player_key = mention_key
 
     if player_key is None:
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"❌ No player found with username `{username}`. Check the spelling or use `/leaderboard` to find them.",
             ephemeral=True,
         )
@@ -1856,7 +1857,7 @@ async def removetier(interaction: discord.Interaction, username: str, gamemode: 
         gamemodes = data.get("gamemodes", DEFAULT_GAMEMODES)
         existing = [gm for gm in gamemodes if gm.lower() in player_data and isinstance(player_data.get(gm.lower()), dict) and "tier" in player_data[gm.lower()]]
         existing_str = ", ".join(f"`{g}`" for g in existing) if existing else "*(none)*"
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"❌ `{username}` has no `{gamemode}` tier to remove.\n**Their current tiers:** {existing_str}",
             ephemeral=True,
         )
@@ -1875,7 +1876,7 @@ async def removetier(interaction: discord.Interaction, username: str, gamemode: 
     embed.add_field(name="Gamemode",  value=f"`{gamemode}`",  inline=True)
     embed.add_field(name="Tier Removed", value=f"`{old_tier}`", inline=True)
     embed.set_footer(text=f"Removed by {interaction.user}")
-    await interaction.response.send_message(embed=embed)
+    await interaction.followup.send(embed=embed)
 
 
 @tree.command(name="panel", description="Post the testing panel with waitlist buttons")
