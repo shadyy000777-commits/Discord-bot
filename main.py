@@ -4303,8 +4303,14 @@ def api_players_options():
 @web_app.route("/tiers_data.json")
 def serve_tiers_data():
     """Serve raw tiers_data.json so the leaderboard JS can process it client-side."""
-    from flask import make_response, send_file
-    resp = make_response(send_file(DATA_FILE, mimetype="application/json"))
+    import os as _os
+    from flask import make_response, send_file, jsonify
+    if not _os.path.exists(DATA_FILE):
+        # File not yet pulled from GitHub — return empty shell so the page
+        # loads cleanly rather than throwing a 500.
+        resp = make_response(jsonify({"players": {}, "profiles": {}, "gamemodes": []}))
+    else:
+        resp = make_response(send_file(DATA_FILE, mimetype="application/json"))
     resp.headers["Access-Control-Allow-Origin"] = "*"
     resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     return resp
@@ -4323,6 +4329,12 @@ def run_bot():
     bot.run(TOKEN)
 
 if __name__ == "__main__":
+    # Pull the latest tiers_data.json from GitHub before anything else so the
+    # web server always has real data from the first request — even on a fresh
+    # Railway deploy where the file isn't committed to the repo.
+    print("[startup] Pulling tiers_data.json from GitHub before starting servers…")
+    asyncio.run(_pull_data_from_github())
+
     # DISABLE_DISCORD_BOT is set only in this Replit workspace's env — Railway's
     # separate bot service (deployed from the Discord-bot repo) does not have it,
     # so this only stops the bot here, never in production. This avoids running
