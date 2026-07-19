@@ -1393,12 +1393,17 @@ async def testerstats(interaction: discord.Interaction):
 
     sorted_testers = sorted(counts.items(), key=lambda x: x[1]["total"], reverse=True)
 
-    medals = ["🥇", "🥈", "🥉"]
+    medals = [
+        "<:emoji_31:1526788415389962310>",
+        "<:emoji_32:1526788682130919488>",
+        "<:emoji_33:1526788720597008385>",
+    ]
+    tester_emoji = "<:emoji_39:1522696411723075654>"
     lines = []
     for i, (judge, c) in enumerate(sorted_testers):
         medal = medals[i] if i < 3 else f"**{i+1}.**"
         lines.append(
-            f"{medal} @{judge} — **{c['total']}** total | **{c['week']}** this week | **{c['month']}** this month"
+            f"{medal} {tester_emoji} @{judge} — **{c['total']}** total | **{c['week']}** this week | **{c['month']}** this month"
         )
 
     embed = discord.Embed(
