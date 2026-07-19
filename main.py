@@ -1164,9 +1164,9 @@ async def submittest(
         )
         return
 
-    # Defer ephemerally so the "X used /submittest" indicator is hidden from
-    # the channel. The actual result is sent as a plain channel message below.
-    await interaction.response.defer(ephemeral=True)
+    # Defer immediately — save_data awaits a GitHub push and role removal
+    # hits the Discord API, both of which can exceed Discord's 3-second timeout.
+    await interaction.response.defer()
 
     data = load_data()
     gm_key = gamemode.lower()
@@ -1315,17 +1315,10 @@ async def submittest(
         skin_file = discord.File(buf, filename="skin.png")
         embed.set_thumbnail(url="attachment://skin.png")
 
-    # Send as a regular channel message so no "X used /submittest" header appears
     if skin_file:
-        await interaction.channel.send(content=f"**{username}**", embed=embed, file=skin_file)
+        await interaction.followup.send(content=f"**{username}**", embed=embed, file=skin_file)
     else:
-        await interaction.channel.send(content=f"**{username}**", embed=embed)
-
-    # Dismiss the ephemeral "is thinking…" message so it doesn't linger
-    try:
-        await interaction.delete_original_response()
-    except Exception:
-        pass
+        await interaction.followup.send(content=f"**{username}**", embed=embed)
 
 
 @tree.command(name="history", description="View tier test history for a player")
