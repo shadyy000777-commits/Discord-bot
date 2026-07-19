@@ -205,7 +205,7 @@ STAFF_COMMANDS = [
     "addgamemode", "removegamemode", "clearwaitlist", "clearallwaitlists",
     "nexttester", "setwaitlistcategory", "queue", "kickfromqueue", "leaderboard", "profile",
     "pointsto", "setimage", "point", "region",
-    "gettier", "history", "image", "tierlist", "waitlist", "website",
+    "gettier", "history", "testerstats", "image", "tierlist", "waitlist", "website",
     "removeplayerrole", "verify", "testing",
 ]
 
@@ -1359,6 +1359,55 @@ async def history(interaction: discord.Interaction, username: str):
         )
     embed.set_footer(text=f"Showing last {len(recent)} of {len(player_tests)} tests")
     await interaction.response.send_message(embed=embed)
+
+
+@tree.command(name="testerstats", description="Show a leaderboard of tests submitted by each tester")
+@require_command_role("testerstats")
+async def testerstats(interaction: discord.Interaction):
+    await interaction.response.defer()
+    data = load_data()
+    tests = data.get("tests", [])
+
+    now = datetime.datetime.utcnow()
+    week_ago  = now - datetime.timedelta(days=7)
+    month_ago = now - datetime.timedelta(days=30)
+
+    counts: dict[str, dict] = {}
+    for t in tests:
+        judge = t.get("judged_by", "Unknown")
+        if judge not in counts:
+            counts[judge] = {"total": 0, "week": 0, "month": 0}
+        counts[judge]["total"] += 1
+        try:
+            ts = datetime.datetime.fromisoformat(t["tested_at"])
+            if ts >= week_ago:
+                counts[judge]["week"] += 1
+            if ts >= month_ago:
+                counts[judge]["month"] += 1
+        except (KeyError, ValueError):
+            pass
+
+    if not counts:
+        await interaction.followup.send("No tests have been submitted yet.", ephemeral=True)
+        return
+
+    sorted_testers = sorted(counts.items(), key=lambda x: x[1]["total"], reverse=True)
+
+    medals = ["🥇", "🥈", "🥉"]
+    lines = []
+    for i, (judge, c) in enumerate(sorted_testers):
+        medal = medals[i] if i < 3 else f"**{i+1}.**"
+        lines.append(
+            f"{medal} @{judge} — **{c['total']}** total | **{c['week']}** this week | **{c['month']}** this month"
+        )
+
+    embed = discord.Embed(
+        title="🥇 Tester Leaderboard",
+        description="\n".join(lines),
+        color=discord.Color.gold(),
+    )
+    embed.set_footer(text="Tracks tests submitted via /submittest • Stats update live")
+    await interaction.followup.send(embed=embed)
 
 
 @tree.command(name="profile", description="View a player's full profile card with all tier rankings")
